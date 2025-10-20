@@ -463,22 +463,7 @@ def catalogo():
         "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
         "volver": "Volver al Formulario" if es else "Back to Form",
         "dama": "Dama" if es else "Lady",
-        ""caballero": "Caballero" if es else "Gentleman",
-        "metal": "Metal" if es else "Metal",
-    }
-
-    # ... (código anterior) ...
-    @app.route("/catalogo", methods=["GET", "POST"])
-    def catalogo():
-    # ... (código anterior) ...
-    idioma = session.get("idioma", "Español")
-    es = idioma == "Español"
-    
-    t = {
-        "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
-        "volver": "Volver al Formulario" if es else "Back to Form",
-        "dama": "Dama" if es else "Lady",
-        "caballero": "Caballero" if es else "Gentleman",  # <<-- CORREGIDO: SE ELIMINARON LAS COMILLAS DOBLES EXTRA
+        "caballero": "Caballero" if es else "Gentleman", # <<-- CORRECCIÓN APLICADA AQUÍ
         "metal": "Metal" if es else "Metal",
     }
     
