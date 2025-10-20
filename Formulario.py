@@ -15,7 +15,6 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_pa
 
 EXCEL_PATH = "Formulario Catalogo.xlsm"
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
-# 🚨 AJUSTE 1: Se cambia el valor por defecto a 5600.00 USD
 DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 
 # Variables globales para los DataFrames (Caché)
@@ -29,7 +28,6 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    # Usar variable de entorno para API Key en un entorno real
     API_KEY = "goldapi-4g9e8p719mgvhodho-io"
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -48,7 +46,6 @@ def obtener_precio_oro():
         return DEFAULT_GOLD_PRICE, "fallback"
         
     except (requests.exceptions.RequestException, Exception) as e:
-        # 🚨 NOTA: Este error ahora usará 5600.00 USD
         logging.error(f"Error al obtener precio del oro: {e}. Usando fallback ({DEFAULT_GOLD_PRICE}).")
         return DEFAULT_GOLD_PRICE, "fallback"
 
@@ -64,15 +61,13 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
 def cargar_datos():
     """
     Carga los DataFrames con las correcciones de nombres de columna.
-    La columna SIZE no existe en WEDDING BANDS (df).
     """
     global df_global, df_adicional_global
-    # Lógica de caché: Si ya están cargados, los devuelve inmediatamente.
     if not df_global.empty and not df_adicional_global.empty:
         return df_global, df_adicional_global
 
     try:
-        # 1. Cargar la hoja WEDDING BANDS (Encabezados en la Fila 2 -> índice 1)
+        # 1. Cargar la hoja WEDDING BANDS
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         df = df_raw.iloc[2:].copy()
@@ -82,7 +77,7 @@ def cargar_datos():
         if 'WIDTH' in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
-        # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0) para Costos Adicionales
+        # 2. Cargar la hoja SIZE
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         new_columns_adicional = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
         df_adicional = df_adicional_raw.iloc[1:].copy()
@@ -97,7 +92,6 @@ def cargar_datos():
             if col in df_adicional.columns:
                 df_adicional[col] = df_adicional[col].astype(str).str.strip()
         
-        # Asignar a globales para caché
         df_global = df
         df_adicional_global = df_adicional
                 
@@ -112,7 +106,7 @@ def cargar_datos():
     
 
 def obtener_nombre_archivo_imagen(ruta_completa):
-    """Extrae solo el nombre del archivo del path y maneja barras invertidas de Windows."""
+    """Extrae solo el nombre del archivo del path."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return None
     
@@ -120,9 +114,12 @@ def obtener_nombre_archivo_imagen(ruta_completa):
     nombre_archivo = os.path.basename(ruta_limpia).strip()
     return nombre_archivo.replace('%20', ' ')
 
-def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero):
+# 🚨 AJUSTE: La función ahora acepta 'select_text' como argumento.
+def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero, select_text):
+    """Busca peso y costos fijo/adicional."""
     
-    if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == t['seleccionar'].upper():
+    # 🚨 CORRECCIÓN NameError: Usa 'select_text' en lugar de t['seleccionar'].upper()
+    if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0, 0, 0 
         
     # 1. Buscar el PESO y COSTO FIJO en df (WEDDING BANDS)
@@ -187,14 +184,10 @@ def formulario():
         "email": "Email de Contacto" if es else "Contact Email"
     }
     
-    # --- 1. Obtener/Establecer Datos del Cliente ---
-    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
-    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
-
-    # --- 2. Obtener Selecciones de Anillo ---
+    # 🚨 Inicialización de Modelos/Metales: Usar "t['seleccionar']" solo si no hay nada en sesión O es la carga inicial (GET sin POST)
     
-    # 🚨 AJUSTE 2: Inicializar sin session si es el primer GET (si no vienen en el POST)
-    if request.method == "GET" and "modelo_dama" not in session:
+    # Si es el primer GET a la página, borramos las selecciones de modelos para que no queden "pegados"
+    if request.method == "GET" and "modelo_dama" not in session and "modelo_cab" not in session:
         modelo_dama = t['seleccionar'].upper()
         metal_dama = ""
         modelo_cab = t['seleccionar'].upper()
@@ -205,6 +198,10 @@ def formulario():
         modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
         metal_cab = session.get("metal_cab", "").upper()
     
+    # Datos de cliente y detalles del anillo
+    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
+    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
+
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
@@ -227,52 +224,36 @@ def formulario():
         if "idioma" in request.form:
             return redirect(url_for("formulario"))
 
-    # --- Opciones disponibles (Obtiene ANCHOS de df y TALLAS de df_adicional) ---
+    # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
             return [], []
-            
+        
         filtro_ancho = (df["NAME"] == modelo)
-        if "ANCHO" not in df.columns:
-             return [], []
-            
-        anchos = sorted(df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist())
-        
-        if "SIZE" not in df_adicional.columns:
-            tallas = []
-        else:
-            tallas = sorted(df_adicional["SIZE"].astype(str).str.strip().unique().tolist(), 
-                              key=lambda x: (re.sub(r'\D', '', x), x)) 
-        
+        anchos = sorted(df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist()) if "ANCHO" in df.columns else []
+        tallas = sorted(df_adicional["SIZE"].astype(str).str.strip().unique().tolist(), 
+                          key=lambda x: (re.sub(r'\D', '', x), x)) if "SIZE" in df_adicional.columns else []
         return anchos, tallas
 
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
-    # 🚨 AJUSTE 3: Forzar la selección del primer ancho y talla si el modelo está seleccionado
-    if modelo_dama != t['seleccionar'].upper() and not anchos_d and not tallas_d:
-        # No hay datos para el modelo, forzamos la deselección
-        modelo_dama = t['seleccionar'].upper()
-        metal_dama = ""
-    elif modelo_dama != t['seleccionar'].upper():
+    # Forzar la selección del primer ancho y talla si el modelo está seleccionado
+    if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
         if not talla_dama and tallas_d:
             talla_dama = tallas_d[0]
 
-    if modelo_cab != t['seleccionar'].upper() and not anchos_c and not tallas_c:
-        # No hay datos para el modelo, forzamos la deselección
-        modelo_cab = t['seleccionar'].upper()
-        metal_cab = ""
-    elif modelo_cab != t['seleccionar'].upper():
+    if modelo_cab != t['seleccionar'].upper():
         if not ancho_cab and anchos_c:
             ancho_cab = anchos_c[0]
         if not talla_cab and tallas_c:
             talla_cab = tallas_c[0]
 
     # --- Cálculo dama ---
-    # 🚨 AJUSTE 4: El cálculo se realiza en base a 'precio_onza', que SIEMPRE tendrá un valor (live o fallback)
-    peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA")
+    # 🚨 CORRECCIÓN NameError: Se pasa el texto de selección como último argumento
+    peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
@@ -280,7 +261,8 @@ def formulario():
         monto_total += monto_dama
 
     # --- Cálculo caballero ---
-    peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO")
+    # 🚨 CORRECCIÓN NameError: Se pasa el texto de selección como último argumento
+    peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
@@ -291,10 +273,6 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # Mantiene el valor actual si existe, si no, usa el primer disponible
-        ancho_display = ancho_actual if ancho_actual in anchos else (anchos[0] if anchos else "")
-        talla_display = talla_actual if talla_actual in tallas else (tallas[0] if tallas else "")
-
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
