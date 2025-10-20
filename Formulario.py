@@ -4,13 +4,14 @@ import pandas as pd
 from flask import Flask, request, render_template_string, session, redirect, url_for
 import logging
 import re
-import math 
+import math
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
+# Es VITAL que uses una clave secreta fuerte y única, especialmente en producción.
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing")
 
 EXCEL_PATH = "Formulario Catalogo.xlsm"
@@ -24,6 +25,7 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
+    # Usa variables de entorno para API Key en un entorno real
     API_KEY = "goldapi-4g9e8p719mgvhodho-io"
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -60,38 +62,39 @@ def cargar_datos():
         df = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=1) 
         df_size = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl")
         
-        # Limpieza inicial de espacios en encabezados (Esto es bueno)
+        # Limpieza inicial de espacios en encabezados
         df.columns = df.columns.str.strip()
         df_size.columns = df_size.columns.str.strip()
         
-        # ❌ QUITAR la línea 'df.columns = df.columns.str.upper()'
-        # ❌ QUITAR la línea 'df_size.columns = df_size.columns.str.upper()'
-        
-        # Limpieza de valores clave (Usando la capitalización EXACTA del Excel)
-        # 🚨 CAMBIO CLAVE: Usamos 'Ruta Foto' y 'NAME' y 'METAL'
+        # Limpieza de valores clave (Usando la capitalización EXACTA del Excel: 'Ruta Foto', 'NAME')
         for col in ["NAME", "METAL", "Ruta Foto"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             
-        # 🚨 CAMBIO CLAVE: Usamos 'NAME'
+        # Limpieza de valores clave (Usando la capitalización EXACTA del Excel: 'NAME', 'SIZE')
         for col in ["NAME", "ANCHO", "SIZE"]:
             if col in df_size.columns:
                 df_size[col] = df_size[col].astype(str).str.strip()
             
         return df, df_size
     except Exception as e:
-        # Si el error Key Error persiste, ahora sabes que es exactamente por un espacio extra o un error de tecleo en el Excel.
         logging.error(f"Error al leer el archivo Excel: {e}")
         return pd.DataFrame(), pd.DataFrame()
     
 
 def obtener_nombre_archivo_imagen(ruta_completa):
-    """Extrae solo el nombre del archivo del path y lo limpia. Ya NO fuerza minúsculas."""
+    """Extrae solo el nombre del archivo del path y maneja barras invertidas de Windows."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return None
-    # CORRECCIÓN: os.path.basename NO DEBE LLEVAR .lower() para evitar problemas en Linux/Render.
-    nombre_archivo = os.path.basename(str(ruta_completa)) 
-    return nombre_archivo.replace('%20', ' ').strip() # Limpiamos espacios y posibles URL encodings
+    
+    # 🚨 CORRECCIÓN CLAVE: Reemplaza \ con / para que os.path.basename funcione en Linux/Render.
+    ruta_limpia = str(ruta_completa).replace('\\', '/')
+    
+    # Extrae solo el nombre del archivo
+    nombre_archivo = os.path.basename(ruta_limpia).strip()
+    
+    # Limpiamos posibles encodings remanentes (ej: %20) y espacios
+    return nombre_archivo.replace('%20', ' ')
 
 # --------------------- RUTAS FLASK CORREGIDAS ---------------------
 
@@ -159,7 +162,6 @@ def formulario():
         if "idioma" in request.form:
             return redirect(url_for("formulario"))
 
-    # ... (Resto de funciones get_options, obtener_peso_y_costo y cálculos, son correctas) ...
     # --- Opciones disponibles (se basan en los modelos seleccionados) ---
     def get_options(modelo):
         if modelo == t['seleccionar']:
@@ -168,7 +170,7 @@ def formulario():
         anchos = sorted(df_size.loc[filtro_size, "ANCHO"].astype(str).str.strip().unique().tolist())
         # Ordena las tallas numéricamente
         tallas = sorted(df_size.loc[filtro_size, "SIZE"].astype(str).str.strip().unique().tolist(), 
-                         key=lambda x: (re.sub(r'\D', '', x), x)) 
+                              key=lambda x: (re.sub(r'\D', '', x), x)) 
         return anchos, tallas
 
     anchos_d, tallas_d = get_options(modelo_dama)
@@ -384,11 +386,9 @@ def catalogo():
         "metal": "Metal" if es else "Metal",
     }
 
-   # df_catalogo = df[["NAME", "METAL", "Ruta Foto"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
-   # df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
-
-   df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
-   df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
+    # 🚨 CORRECCIÓN: Usar capitalización exacta 'Ruta Foto' para evitar KeyError
+    df_catalogo = df[["NAME", "METAL", "Ruta Foto"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
+    df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
 
     catalogo_agrupado = {}
     for _, fila in df_catalogo.iterrows():
@@ -436,7 +436,8 @@ def catalogo():
     
     for modelo, data in catalogo_agrupado.items():
         nombre_foto = data['NOMBRE_FOTO']
-        ruta_web_foto = url_for('static', filename=nombre_foto)
+        # La función url_for('static', ...) crea la ruta web correcta: /static/nombre_foto.bmp
+        ruta_web_foto = url_for('static', filename=nombre_foto) 
 
         html_catalogo += f"""
                     <div class="card p-4 flex flex-col items-center text-center">
