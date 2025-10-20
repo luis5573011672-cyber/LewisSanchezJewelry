@@ -57,24 +57,33 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
 def cargar_datos():
     """Carga los DataFrames desde el archivo Excel."""
     try:
-        df = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=1)
+        df = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=1) 
         df_size = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl")
         
+        # Limpieza inicial de espacios en encabezados (Esto es bueno)
         df.columns = df.columns.str.strip()
         df_size.columns = df_size.columns.str.strip()
         
-        for col in ["NAME", "METAL", "Ruta Foto"]:
+        # ❌ QUITAR la línea 'df.columns = df.columns.str.upper()'
+        # ❌ QUITAR la línea 'df_size.columns = df_size.columns.str.upper()'
+        
+        # Limpieza de valores clave (Usando la capitalización EXACTA del Excel)
+        # 🚨 CAMBIO CLAVE: Usamos 'Ruta Foto' y 'NAME' y 'METAL'
+        for col in ["NAME", "METAL", "Ruta Foto"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             
+        # 🚨 CAMBIO CLAVE: Usamos 'NAME'
         for col in ["NAME", "ANCHO", "SIZE"]:
             if col in df_size.columns:
                 df_size[col] = df_size[col].astype(str).str.strip()
             
         return df, df_size
     except Exception as e:
+        # Si el error Key Error persiste, ahora sabes que es exactamente por un espacio extra o un error de tecleo en el Excel.
         logging.error(f"Error al leer el archivo Excel: {e}")
         return pd.DataFrame(), pd.DataFrame()
+    
 
 def obtener_nombre_archivo_imagen(ruta_completa):
     """Extrae solo el nombre del archivo del path y lo limpia. Ya NO fuerza minúsculas."""
@@ -375,8 +384,11 @@ def catalogo():
         "metal": "Metal" if es else "Metal",
     }
 
-    df_catalogo = df[["NAME", "METAL", "Ruta Foto"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
-    df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
+   # df_catalogo = df[["NAME", "METAL", "Ruta Foto"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
+   # df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
+
+   df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
+   df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
 
     catalogo_agrupado = {}
     for _, fila in df_catalogo.iterrows():
