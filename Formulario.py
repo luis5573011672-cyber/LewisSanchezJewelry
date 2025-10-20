@@ -14,7 +14,7 @@ app = Flask(__name__)
 # ¡IMPORTANTE! Clave secreta OBLIGATORIA para usar 'session'.
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing")
 
-EXCEL_PATH = "Formulario Catalogo.xlsm" 
+EXCEL_PATH = "Formulario Catalogo.xlsm"
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 DEFAULT_GOLD_PRICE = 2000.00 # USD por Onza
 
@@ -25,14 +25,14 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
+    API_KEY = "goldapi-4g9e8p719mgvhodho-io"
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
     
     try:
         # Intento de conexión
         response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status() 
+        response.raise_for_status()
         data = response.json()
         price = data.get("price")
         
@@ -44,6 +44,7 @@ def obtener_precio_oro():
         return DEFAULT_GOLD_PRICE, "fallback"
         
     except (requests.exceptions.RequestException, Exception) as e:
+        # Esto captura el error 429 (Too Many Requests) o errores de conexión.
         logging.error(f"Error al obtener precio del oro: {e}. Usando fallback.")
         return DEFAULT_GOLD_PRICE, "fallback"
 
@@ -75,7 +76,7 @@ def cargar_datos():
         for col in ["NAME", "ANCHO", "SIZE"]:
             if col in df_size.columns:
                 df_size[col] = df_size[col].astype(str).str.strip()
-        
+            
         return df, df_size
     except Exception as e:
         logging.error(f"Error al leer el archivo Excel: {e}")
@@ -94,8 +95,11 @@ def obtener_nombre_archivo_imagen(ruta_completa):
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    df, df_size = cargar_datos() 
+    df, df_size = cargar_datos()
     precio_onza, status = obtener_precio_oro()
+
+    # CORRECCIÓN CLAVE: Inicializar monto_total a 0.0 para evitar UnboundLocalError
+    monto_total = 0.0
 
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     session["idioma"] = idioma
@@ -104,7 +108,7 @@ def formulario():
     t = {
         "titulo": "Formulario de Presupuesto u Orden" if es else "Estimate or Work Order Form",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
-        "kilates": "Kilates (Carat)", 
+        "kilates": "Kilates (Carat)",
         "ancho": "Ancho (mm)" if es else "Width (mm)",
         "talla": "Talla (Size)",
         "guardar": "Guardar" if es else "Save",
@@ -141,7 +145,7 @@ def formulario():
         session["talla_cab"] = talla_cab
         
         if "idioma" in request.form:
-             return redirect(url_for("formulario")) 
+            return redirect(url_for("formulario"))
 
     # --- Opciones disponibles (se basan en los modelos seleccionados) ---
     def get_options(modelo):
@@ -151,7 +155,7 @@ def formulario():
         anchos = sorted(df_size.loc[filtro_size, "ANCHO"].astype(str).str.strip().unique().tolist())
         # Ordena las tallas numéricamente
         tallas = sorted(df_size.loc[filtro_size, "SIZE"].astype(str).str.strip().unique().tolist(), 
-                        key=lambda x: (re.sub(r'\D', '', x), x)) 
+                         key=lambda x: (re.sub(r'\D', '', x), x)) 
         return anchos, tallas
 
     anchos_d, tallas_d = get_options(modelo_dama)
@@ -170,7 +174,7 @@ def formulario():
         peso = 0
         if not df_size.loc[filtro_peso].empty:
             peso_fila = df_size.loc[filtro_peso].iloc[0]
-            peso = peso_fila.get("PESO_AJUSTADO", peso_fila.get("PESO", 0)) 
+            peso = peso_fila.get("PESO_AJUSTADO", peso_fila.get("PESO", 0))
             try: peso = float(peso)
             except: peso = 0
 
@@ -181,7 +185,7 @@ def formulario():
         price_cost = 0
         if not df.loc[filtro_costo].empty:
             # Tomamos la primera coincidencia
-            costo_fila = df.loc[filtro_costo].iloc[0] 
+            costo_fila = df.loc[filtro_costo].iloc[0]
             price_cost = costo_fila.get("PRICE COST", 0)
             try: price_cost = float(price_cost)
             except: price_cost = 0
@@ -209,7 +213,7 @@ def formulario():
     # --------------------- Generación del HTML para el Formulario ---------------------
     
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
-        kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True) 
+        kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
         # Asegurar que el ancho y talla actuales estén en las opciones disponibles o usar el primero
         if anchos and ancho_actual not in anchos: ancho_actual = anchos[0]
@@ -280,7 +284,7 @@ def formulario():
                 <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
                 <div class="bg-pink-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
-                        Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span> 
+                        Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span>
                         {' (' + metal_dama + ')' if metal_dama else ''}
                     </p>
                     {selectores_dama}
@@ -292,7 +296,7 @@ def formulario():
                 <h2 class="text-xl font-semibold pt-4 text-blue-700">Modelo {t['cab']}</h2>
                 <div class="bg-blue-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
-                        Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span> 
+                        Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span>
                         {' (' + metal_cab + ')' if metal_cab else ''}
                     </p>
                     {selectores_cab}
@@ -406,11 +410,12 @@ def catalogo():
                 </div>
             
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        """
+    """
     
     for modelo, data in catalogo_agrupado.items():
         nombre_foto = data['NOMBRE_FOTO']
         # ESTA LÍNEA ASEGURA LA RUTA CORRECTA A LA CARPETA 'STATIC'
+        # Nota: Asume que tienes una carpeta 'static' en tu directorio de Flask con las imágenes.
         ruta_web_foto = url_for('static', filename=nombre_foto)
 
         html_catalogo += f"""
