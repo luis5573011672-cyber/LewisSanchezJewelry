@@ -25,7 +25,7 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    # Usa variables de entorno para API Key en un entorno real
+    # Usar variable de entorno para API Key en un entorno real
     API_KEY = "goldapi-4g9e8p719mgvhodho-io"
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -58,13 +58,12 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
 
 def cargar_datos():
     """Carga los DataFrames desde el archivo Excel y FUERZA la asignación de encabezados
-       manejando la asimetría de las hojas (WEDDING BANDS en Fila 2, SIZE en Fila 1)."""
+       manejando la asimetría (WEDDING BANDS en Fila 2, SIZE en Fila 1)."""
     try:
         # 1. Cargar la hoja WEDDING BANDS (Encabezados en la Fila 2 -> índice 1)
-        # La tabla comienza en Fila 3 (índice 2)
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
         
-        # Leemos los encabezados de la fila de índice 1 (Fila 2)
+        # Leemos los encabezados de la fila de índice 1 (Fila 2), limpiamos y forzamos a MAYÚSCULAS
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         
         # Asignar encabezados y empezar el DataFrame desde la Fila 3 (índice 2)
@@ -72,11 +71,13 @@ def cargar_datos():
         df.columns = new_columns_df
         
         # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0)
-        # La tabla comienza en Fila 2 (índice 1)
         df_size_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         
-        # Leemos los encabezados de la fila de índice 0 (Fila 1)
+        # Leemos los encabezados de la fila de índice 0 (Fila 1), limpiamos y forzamos a MAYÚSCULAS
         new_columns_size = df_size_raw.iloc[0].astype(str).str.strip().str.upper()
+        
+        # DEBUG FINAL: Si el error persiste, esta línea lo mostrará en el log de Render.
+        logging.warning(f"Columnas leídas para la hoja SIZE: {new_columns_size.tolist()}")
         
         # Asignar encabezados y empezar el DataFrame desde la Fila 2 (índice 1)
         df_size = df_size_raw.iloc[1:].copy()
@@ -94,14 +95,16 @@ def cargar_datos():
         return df, df_size
     except Exception as e:
         logging.error(f"Error CRÍTICO al leer el archivo Excel y asignar encabezados: {e}") 
+        # Devolvemos DataFrames vacíos para que la aplicación no se caiga
         return pd.DataFrame(), pd.DataFrame()
+    
 
 def obtener_nombre_archivo_imagen(ruta_completa):
     """Extrae solo el nombre del archivo del path y maneja barras invertidas de Windows."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return None
     
-    # CORRECCIÓN: Reemplaza \ con / para que os.path.basename funcione correctamente en Linux/Render.
+    # Reemplaza \ con / para que os.path.basename funcione correctamente en Linux/Render.
     ruta_limpia = str(ruta_completa).replace('\\', '/')
     
     # Extrae solo el nombre del archivo
@@ -110,7 +113,7 @@ def obtener_nombre_archivo_imagen(ruta_completa):
     # Limpiamos posibles encodings remanentes (ej: %20) y espacios
     return nombre_archivo.replace('%20', ' ')
 
-# --------------------- RUTAS FLASK CORREGIDAS ---------------------
+# --------------------- RUTAS FLASK ---------------------
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
@@ -146,8 +149,7 @@ def formulario():
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
     # --- 2. Obtener Selecciones de Anillo (Modelo, Metal, Kilates, Ancho, Talla) ---
-    # CORRECCIÓN: Leer el valor, luego forzar a mayúsculas para consistencia con los DataFrames.
-    # El valor por defecto t['seleccionar'] no debe ser convertido si está siendo usado para la comparación de "no seleccionado".
+    # Leemos de la sesión y forzamos a MAYÚSCULAS para consistencia con los DataFrames
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
     
@@ -180,27 +182,27 @@ def formulario():
 
     # --- Opciones disponibles (se basan en los modelos seleccionados) ---
     def get_options(modelo):
-        # CORRECCIÓN: Si el DataFrame está vacío o es el valor por defecto (en mayúsculas), retornar vacío
+        # Comprobar si df_size está vacío
         if df_size.empty or modelo == t['seleccionar'].upper():
             return [], []
             
+        # NAME, ANCHO, SIZE ya están en mayúsculas y limpias
         filtro_size = (df_size["NAME"] == modelo)
         anchos = sorted(df_size.loc[filtro_size, "ANCHO"].astype(str).str.strip().unique().tolist())
-        # Ordena las tallas numéricamente
         tallas = sorted(df_size.loc[filtro_size, "SIZE"].astype(str).str.strip().unique().tolist(), 
                               key=lambda x: (re.sub(r'\D', '', x), x)) 
         return anchos, tallas
 
-    # Esto llama a get_options, y si df_size está vacío, retorna [].
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
     # --- Función de Búsqueda de Peso y Costo ---
     def obtener_peso_y_costo(modelo, metal, ancho, talla):
+        # Comprobación de DataFrames vacíos antes de buscar
         if df.empty or df_size.empty or not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar'].upper():
             return 0, 0
             
-        # 1. Buscar el PESO en df_size (por Modelo, Ancho, y Talla)
+        # 1. Buscar el PESO en df_size
         filtro_peso = (df_size["NAME"] == modelo) & \
                       (df_size["ANCHO"] == ancho) & \
                       (df_size["SIZE"] == talla)
@@ -212,14 +214,14 @@ def formulario():
             try: peso = float(peso)
             except: peso = 0
 
-        # 2. Buscar el COSTO FIJO en df (solo por Modelo y Metal)
+        # 2. Buscar el COSTO FIJO en df
         filtro_costo = (df["NAME"] == modelo) & \
                        (df["METAL"] == metal)
         
         price_cost = 0
         if not df.loc[filtro_costo].empty:
             costo_fila = df.loc[filtro_costo].iloc[0]
-            price_cost = costo_fila.get("PRICE COST", 0)
+            price_cost = costo_fila.get("PRICE COST", 0) 
             try: price_cost = float(price_cost)
             except: price_cost = 0
 
@@ -414,7 +416,7 @@ def catalogo():
         <h1 style="color: red;">Error de Carga de Datos</h1>
         <p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p>
         <p>Asegúrese de que '{EXCEL_PATH}' existe y tiene datos.</p>
-        <a href="{url_for('formulario')}">Volver</a>
+        <a href="{url_for('formulario')}">Volver al Formulario</a>
         </div></body></html>
         """
          return render_template_string(html_catalogo)
