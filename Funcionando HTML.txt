@@ -14,7 +14,7 @@ EXCEL_PATH = "Formulario Catalogo.xlsm"
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 
 # Precio de respaldo (fallback) en caso de que la API de Oro falle o exceda límites.
-DEFAULT_GOLD_PRICE = 2000.00 # USD por Onza
+DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza
 
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
