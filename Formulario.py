@@ -28,7 +28,6 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    # Usar variable de entorno para API Key en un entorno real
     API_KEY = "goldapi-4g9e8p719mgvhodho-io"
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -118,7 +117,6 @@ def obtener_nombre_archivo_imagen(ruta_completa):
 def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero, select_text):
     """Busca peso y costos fijo/adicional."""
     
-    # CORRECCIÓN NameError: Usa 'select_text' en lugar de t['seleccionar'].upper()
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0, 0, 0 
         
@@ -184,36 +182,64 @@ def formulario():
         "email": "Email de Contacto" if es else "Contact Email"
     }
     
-    # Inicialización de Modelos/Metales: Usar "t['seleccionar']" solo si no hay nada en sesión O es la carga inicial (GET sin POST)
-    if request.method == "GET" and "modelo_dama" not in session and "modelo_cab" not in session:
+    fresh_selection = request.args.get("fresh_selection")
+    
+    # --- 1. Obtener/Establecer Datos del Cliente (Persisten) ---
+    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
+    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
+
+    # --- 2. Obtener Selecciones de Anillo ---
+    
+    if request.method == "GET" and not fresh_selection:
+        # Caso 1: GET limpio (navegación directa). ¡Abrir en blanco y limpiar sesión!
         modelo_dama = t['seleccionar'].upper()
         metal_dama = ""
         modelo_cab = t['seleccionar'].upper()
         metal_cab = ""
+        
+        kilates_dama = "14"
+        ancho_dama = ""
+        talla_dama = ""
+        kilates_cab = "14"
+        ancho_cab = ""
+        talla_cab = ""
+        
+        # Limpiar la sesión para garantizar la persistencia del estado limpio
+        for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "kilates_dama", "ancho_dama", "talla_dama", "kilates_cab", "ancho_cab", "talla_cab"]:
+             if key in session:
+                del session[key]
+
     else:
+        # Caso 2: POST (submit, auto-submit) O GET después de /catalogo (fresh_selection=True)
+        # Cargamos los modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
         modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
         metal_dama = session.get("metal_dama", "").upper()
         modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
         metal_cab = session.get("metal_cab", "").upper()
-    
-    # Datos de cliente y detalles del anillo
-    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
-    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
+        
+        # Los detalles (kilates, ancho, talla) se obtienen de la forma (POST) o de la sesión
+        kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
+        ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
+        talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
+        
+        kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
+        ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
+        talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
+        
+        # Si venimos del catálogo, reseteamos el ancho/talla para que la lógica de "Forzar selección del primer ancho/talla" se aplique
+        if fresh_selection:
+            ancho_dama = ""
+            talla_dama = ""
+            ancho_cab = ""
+            talla_cab = ""
 
-    kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
-    ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
-    talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
-    
-    kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
-    ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
-    talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
 
     if request.method == "POST":
         # Guardar datos del cliente
         session["nombre_cliente"] = nombre_cliente
         session["email_cliente"] = email_cliente
         
-        # Guardar selecciones de anillo
+        # Guardar TODAS las selecciones de anillo (para mantener la persistencia después del POST/Auto-Submit)
         session["kilates_dama"] = kilates_dama
         session["ancho_dama"] = ancho_dama
         session["talla_dama"] = talla_dama
@@ -271,7 +297,7 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # 🚨 CAMBIO AQUÍ: Añadir onchange="this.form.submit()" para recálculo automático
+        # Añadir onchange="this.form.submit()" para recálculo automático
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -288,7 +314,7 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # 🚨 CAMBIO AQUÍ: Añadir onchange="this.form.submit()" para recálculo automático
+        # Añadir onchange="this.form.submit()" para recálculo automático
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -414,14 +440,15 @@ def catalogo():
                 session[f"metal_{tipo}"] = metal.strip().upper()
                 
                 # Al seleccionar un nuevo modelo, limpiamos las selecciones de ancho/talla de la sesión 
-                # para que se seleccionen los valores por defecto en la siguiente carga.
                 session[f"ancho_{tipo}"] = ""
                 session[f"talla_{tipo}"] = ""
 
-                return redirect(url_for("formulario"))
+                # 🚨 CAMBIO CLAVE: Redirigir con un argumento para indicar que es una selección nueva
+                return redirect(url_for("formulario", fresh_selection=True))
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
         
+        # Si se presiona "Volver al Formulario" sin seleccionar nada, regresamos sin la bandera
         return redirect(url_for("formulario"))
 
     # 2. Generación del catálogo (Agrupado por Modelo, opciones por Metal)
