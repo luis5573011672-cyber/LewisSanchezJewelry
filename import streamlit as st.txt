@@ -1,0 +1,232 @@
+import streamlit as st
+import requests
+import pandas as pd
+import os
+
+# --------------------- FUNCIÓN PRECIO DE ORO ---------------------
+def obtener_precio_oro():
+    API_KEY = "goldapi-cyugmsm9dhxm1o-io"
+    url = "https://www.goldapi.io/api/XAU/USD"
+    headers = {
+        "x-access-token": API_KEY,
+        "Content-Type": "application/json"
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        if "price" in data:
+            return data["price"]
+        else:
+            st.error("No se encontró el precio en la respuesta de la API.")
+            return None
+    except Exception as e:
+        st.error(f"No se pudo obtener el precio de la onza de oro: {e}")
+        return None
+
+precio_onza = obtener_precio_oro() or 1900.0  # valor por defecto
+
+# --------------------- CARGA DE DATOS ---------------------
+excel_path = os.path.join(os.getcwd(), "Formulario Catalogo.xlsm")
+
+@st.cache_data
+def cargar_datos():
+    df = pd.read_excel(excel_path, sheet_name="WEDDING BANDS", engine="openpyxl", header=1)
+    df.columns = df.columns.str.strip()
+    return df
+
+@st.cache_data
+def cargar_tallas():
+    df_size = pd.read_excel(excel_path, sheet_name="SIZE", engine="openpyxl")
+    return sorted(df_size["SIZE"].dropna().astype(str).unique())
+
+df = cargar_datos()
+tallas_disponibles = cargar_tallas()
+
+# --------------------- FUNCIONES AUXILIARES ---------------------
+def obtener_anchos(modelo, metal):
+    filtro = (df["NAME"].astype(str).str.strip() == modelo) & (df["METAL"].astype(str).str.strip() == metal)
+    return sorted(df.loc[filtro, "WIDTH"].dropna().astype(str).unique())
+
+def obtener_kilates(modelo):
+    filtro = df["NAME"].astype(str).str.strip() == modelo
+    return sorted(df.loc[filtro, "CARAT"].dropna().astype(str).unique())
+
+def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
+    valor_gramo = (valor_onza / 31.1035) * pureza_factor
+    monto_total = valor_gramo * peso_gramos
+    return valor_gramo, monto_total
+
+# --------------------- SESIÓN ---------------------
+if "pantalla" not in st.session_state:
+    st.session_state.pantalla = "formulario"
+
+# Inicializar selección
+for campo in ["seleccion_dama_clave", "modelo_dama", "metal_dama",
+              "seleccion_cab_clave", "modelo_cab", "metal_cab"]:
+    if campo not in st.session_state:
+        st.session_state[campo] = ""
+
+# Idioma
+idioma = st.radio("Idioma / Language", ["Español", "English"])
+es = idioma == "Español"
+
+# Diccionario de textos
+t = {
+    "titulo": "Formulario de Presupuesto u Orden" if es else "Estimate or Work Order Form",
+    "cliente": "Nombre del cliente" if es else "Client name",
+    "telefono": "Teléfono" if es else "Phone",
+    "correo": "Correo electrónico" if es else "Email",
+    "direccion": "Dirección" if es else "Address",
+    "presupuesto": "Presupuesto" if es else "Estimate",
+    "orden": "Orden de Trabajo" if es else "Work Order",
+    "grabado_si": "Sí" if es else "Yes",
+    "grabado_no": "No" if es else "No",
+    "grabado_opcion": "¿Desea grabado?" if es else "Do you want engraving?",
+    "grabado_dama": "Grabado para dama" if es else "Lady engraving",
+    "grabado_caballero": "Grabado para caballero" if es else "Gentleman engraving",
+    "nombre_caballero": "Nombre del caballero" if es else "Gentleman name",
+    "oro_amarillo": "Oro Amarillo" if es else "Yellow Gold",
+    "oro_blanco": "Oro Blanco" if es else "White Gold",
+    "oro_rosa": "Oro Rosa" if es else "Rose Gold",
+    "ancho": "Ancho del caballero" if es else "Width",
+    "talla": "Talla del caballero" if es else "Size",
+    "monto": "Monto total (ej. $1,200.50 USD)" if es else "Total amount (e.g. $1,200.50 USD)",
+    "guardar": "Guardar" if es else "Save",
+    "catalogo": "Ir al catálogo de anillos" if es else "Go to ring catalog",
+    "volver": "Volver al formulario" if es else "Back to form",
+    "limpiar_dama": "Limpiar Dama" if es else "Clear Lady",
+    "limpiar_cab": "Limpiar Caballero" if es else "Clear Gentleman",
+}
+
+# --------------------- PÁGINA FORMULARIO ---------------------
+if st.session_state.pantalla == "formulario":
+    st.set_page_config(page_title="Formulario de Presupuesto u Orden", layout="centered")
+    st.title("Formulario de Presupuesto u Orden")
+
+    # Datos del cliente
+    cliente = st.text_input("Nombre del cliente")
+    telefono = st.text_input("Teléfono")
+    correo = st.text_input("Correo electrónico")
+    direccion = st.text_input("Dirección")
+
+    CheckPres = st.checkbox("Presupuesto", key="check_pres")
+    CheckOrder = st.checkbox("Orden de Trabajo", key="check_order")
+
+    opcion_grabado = st.radio("¿Desea grabado?", ["Sí", "No"], key="grabado_op")
+    grabado_dama = st.text_input("Grabado para dama") if opcion_grabado == "Sí" else ""
+    grabado_caballero = st.text_input("Grabado para caballero") if opcion_grabado == "Sí" else ""
+
+    # Datos dama
+    st.subheader("Datos de la dama")
+    SelecDama = st.text_input("Nombre de la dama", value=st.session_state.modelo_dama, key="input_dama")
+    anchos_dama = obtener_anchos(st.session_state.modelo_dama, st.session_state.metal_dama)
+    AnchoDama = st.selectbox("Ancho de la dama", options=anchos_dama, key="ancho_dama")
+    TallaDama = st.selectbox("Talla de la dama", options=tallas_disponibles, key="talla_dama")
+    KilatesDama = st.selectbox("Kilates", options=obtener_kilates(st.session_state.modelo_dama) if st.session_state.modelo_dama else [], key="kilates_dama")
+
+    # Datos caballero
+    st.subheader("Datos del caballero")
+    SelecCab = st.text_input("Nombre del caballero", value=st.session_state.modelo_cab, key="input_cab")
+    anchos_cab = obtener_anchos(st.session_state.modelo_cab, st.session_state.metal_cab)
+    AnchoCab = st.selectbox("Ancho del caballero", options=anchos_cab, key="ancho_cab")
+    TallaCab = st.selectbox("Talla del caballero", options=tallas_disponibles, key="talla_cab")
+    KilatesCab = st.selectbox("Kilates", options=obtener_kilates(st.session_state.modelo_cab) if st.session_state.modelo_cab else [], key="kilates_cab")
+
+    # Botón para ir al catálogo
+    if st.button("Ir al catálogo de anillos"):
+        st.session_state.pantalla = "catalogo"
+        st.stop()  # Forzar recarga de página
+
+    # --------------------- CÁLCULO AUTOMÁTICO ---------------------
+    factor_kilates = {"22 Kts": 0.9167, "18 Kts": 0.75, "14 Kts": 0.5833, "10 Kts": 0.4167}
+    monto_total = 0.0
+
+    # Dama
+    if st.session_state.modelo_dama and KilatesDama:
+        filtro = (df["NAME"].astype(str).str.strip() == st.session_state.modelo_dama) & \
+                 (df["CARAT"].astype(str).str.strip() == KilatesDama)
+        if not df.loc[filtro].empty:
+            peso_dama = df.loc[filtro, "PESO"].values[0]
+            _, monto_dama = calcular_valor_gramo(precio_onza, factor_kilates[KilatesDama], peso_dama)
+            monto_total += monto_dama
+
+    # Caballero
+    if st.session_state.modelo_cab and KilatesCab:
+        filtro = (df["NAME"].astype(str).str.strip() == st.session_state.modelo_cab) & \
+                 (df["CARAT"].astype(str).str.strip() == KilatesCab)
+        if not df.loc[filtro].empty:
+            peso_cab = df.loc[filtro, "PESO"].values[0]
+            _, monto_cab = calcular_valor_gramo(precio_onza, factor_kilates[KilatesCab], peso_cab)
+            monto_total += monto_cab
+
+    st.subheader("Monto Total")
+    st.write(f"${monto_total:,.2f} USD")
+
+# --------------------- PÁGINA CATÁLOGO ---------------------
+# --------------------- PÁGINA CATÁLOGO ---------------------
+elif st.session_state.pantalla == "catalogo":
+    st.title("Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog")
+    num_columnas = 4
+    catalogo = df[df["Ruta Foto"].notna()].drop_duplicates(subset=["NAME", "METAL"]).reset_index(drop=True)
+    total = len(catalogo)
+
+    seleccion_nueva_dama = None
+    seleccion_nueva_cab = None
+
+    for i in range(0, total, num_columnas):
+        fila = catalogo.iloc[i:i + num_columnas]
+        columnas = st.columns(len(fila))
+        for idx, (j, row) in enumerate(fila.iterrows()):
+            with columnas[idx]:
+                modelo = str(row["NAME"]).strip()
+                metal = str(row["METAL"]).strip()
+                clave = f"{modelo}_{metal}"
+                ruta = row["Ruta Foto"]
+
+                if os.path.exists(ruta):
+                    st.image(ruta, width=150)
+                else:
+                    st.warning(f"No se encontró la imagen: {ruta}")
+
+                st.write(f"{modelo} / {metal}")
+
+                # --- Checkbox Dama ---
+                valor_dama = (clave == st.session_state.seleccion_dama_clave)
+                seleccionado_dama = st.checkbox("Dama" if es else "Lady", key=f"dama_{clave}", value=valor_dama)
+
+                if seleccionado_dama and not valor_dama:
+                    seleccion_nueva_dama = clave
+                    st.session_state.modelo_dama = modelo
+                    st.session_state.metal_dama = metal
+
+                # --- Checkbox Caballero ---
+                valor_cab = (clave == st.session_state.seleccion_cab_clave)
+                seleccionado_cab = st.checkbox("Caballero" if es else "Gentleman", key=f"cab_{clave}", value=valor_cab)
+
+                if seleccionado_cab and not valor_cab:
+                    seleccion_nueva_cab = clave
+                    st.session_state.modelo_cab = modelo
+                    st.session_state.metal_cab = metal
+
+    # ---- Actualizar estado después de procesar toda la interfaz ----
+    if seleccion_nueva_dama:
+        st.session_state.seleccion_dama_clave = seleccion_nueva_dama
+        st.session_state.to_uncheck = [k for k in st.session_state.keys() if k.startswith("dama_") and not k.endswith(seleccion_nueva_dama)]
+        st.stop()
+
+    if seleccion_nueva_cab:
+        st.session_state.seleccion_cab_clave = seleccion_nueva_cab
+        st.session_state.to_uncheck = [k for k in st.session_state.keys() if k.startswith("cab_") and not k.endswith(seleccion_nueva_cab)]
+        st.stop()
+
+    # Mostrar selección actual
+    st.subheader("Selección actual" if es else "Current selection")
+    if st.session_state.modelo_dama:
+        st.markdown(f"**Dama:** {st.session_state.modelo_dama} / {st.session_state.metal_dama}")
+    if st.session_state.modelo_cab:
+        st.markdown(f"**Caballero:** {st.session_state.modelo_cab} / {st.session_state.metal_cab}")
+
+    # Botón volver al formulario
+    if st.button(t["volver"] if "t" in globals() else "Volver al formulario"):
+        st.session_state.pantalla = "formulario"
+        st.stop()
