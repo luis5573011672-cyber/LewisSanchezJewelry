@@ -53,12 +53,14 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
         return 0, 0
     
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
-    monto_total = valor_gramo * peso_gramos
+    monto_total = valor_gramo * peso_gramo
     return valor_gramo, monto_total
 
 def cargar_datos():
-    """Carga los DataFrames desde el archivo Excel y FUERZA la asignación de encabezados
-       manejando la asimetría (WEDDING BANDS en Fila 2, SIZE en Fila 1)."""
+    """
+    Carga los DataFrames. df para catálogo/peso (WEDDING BANDS), 
+    df_adicional para costos extra (SIZE).
+    """
     try:
         # 1. Cargar la hoja WEDDING BANDS (Encabezados en la Fila 2 -> índice 1)
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
@@ -70,31 +72,33 @@ def cargar_datos():
         df = df_raw.iloc[2:].copy()
         df.columns = new_columns_df
         
-        # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0)
-        df_size_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
-        
-        # Leemos los encabezados de la fila de índice 0 (Fila 1), limpiamos y forzamos a MAYÚSCULAS
-        new_columns_size = df_size_raw.iloc[0].astype(str).str.strip().str.upper()
-        
-        # DEBUG FINAL: Si el error persiste, esta línea lo mostrará en el log de Render.
-        logging.warning(f"Columnas leídas para la hoja SIZE: {new_columns_size.tolist()}")
-        
-        # Asignar encabezados y empezar el DataFrame desde la Fila 2 (índice 1)
-        df_size = df_size_raw.iloc[1:].copy()
-        df_size.columns = new_columns_size
+        # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0) para Costos Adicionales
+        df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
+        new_columns_adicional = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
+        df_adicional = df_adicional_raw.iloc[1:].copy()
+        df_adicional.columns = new_columns_adicional
 
-        # Limpieza de valores clave (Usamos los nombres de columna en MAYÚSCULAS)
-        for col in ["NAME", "METAL", "RUTA FOTO"]: 
+        # Renombrar 'SIZE' a 'TALLA_ADICIONAL' en la hoja de costos extra para evitar conflictos
+        if 'SIZE' in df_adicional.columns:
+            df_adicional.rename(columns={'SIZE': 'TALLA_ADICIONAL'}, inplace=True) 
+
+        # 3. Limpieza de valores clave
+        # Limpieza en DF principal
+        for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "SIZE", "PESO", "PESO_AJUSTADO"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             
-        for col in ["NAME", "ANCHO", "SIZE"]:
-            if col in df_size.columns:
-                df_size[col] = df_size[col].astype(str).str.strip()
-            
-        return df, df_size
+        # Limpieza en DF adicional (Solo TALLA_ADICIONAL y ADICIONAL)
+        for col in ["TALLA_ADICIONAL", "ADICIONAL"]: 
+            if col in df_adicional.columns:
+                df_adicional[col] = df_adicional[col].astype(str).str.strip()
+                
+        logging.warning(f"Columnas df (WEDDING BANDS): {df.columns.tolist()}")
+        logging.warning(f"Columnas df_adicional (SIZE): {df_adicional.columns.tolist()}")
+
+        return df, df_adicional
     except Exception as e:
-        logging.error(f"Error CRÍTICO al leer el archivo Excel y asignar encabezados: {e}") 
+        logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         # Devolvemos DataFrames vacíos para que la aplicación no se caiga
         return pd.DataFrame(), pd.DataFrame()
     
@@ -119,7 +123,8 @@ def obtener_nombre_archivo_imagen(ruta_completa):
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    df, df_size = cargar_datos()
+    # 🚨 CAMBIO CLAVE: Cargar df_adicional en lugar de df_size
+    df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
 
     monto_total = 0.0
@@ -149,7 +154,6 @@ def formulario():
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
     # --- 2. Obtener Selecciones de Anillo (Modelo, Metal, Kilates, Ancho, Talla) ---
-    # Leemos de la sesión y forzamos a MAYÚSCULAS para consistencia con los DataFrames
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
     
@@ -165,11 +169,9 @@ def formulario():
     talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
 
     if request.method == "POST":
-        # Guardar datos del cliente
         session["nombre_cliente"] = nombre_cliente
         session["email_cliente"] = email_cliente
         
-        # Guardar selecciones de cálculo
         session["kilates_dama"] = kilates_dama
         session["ancho_dama"] = ancho_dama
         session["talla_dama"] = talla_dama
@@ -180,16 +182,17 @@ def formulario():
         if "idioma" in request.form:
             return redirect(url_for("formulario"))
 
-    # --- Opciones disponibles (se basan en los modelos seleccionados) ---
+    # --- Opciones disponibles (se basan en los modelos seleccionados, USANDO SOLO df) ---
     def get_options(modelo):
-        # Comprobar si df_size está vacío
-        if df_size.empty or modelo == t['seleccionar'].upper():
+        # 🚨 CAMBIO CLAVE: Usamos solo df (WEDDING BANDS) para obtener las opciones
+        if df.empty or modelo == t['seleccionar'].upper():
             return [], []
             
-        # NAME, ANCHO, SIZE ya están en mayúsculas y limpias
-        filtro_size = (df_size["NAME"] == modelo)
-        anchos = sorted(df_size.loc[filtro_size, "ANCHO"].astype(str).str.strip().unique().tolist())
-        tallas = sorted(df_size.loc[filtro_size, "SIZE"].astype(str).str.strip().unique().tolist(), 
+        # NAME, ANCHO, SIZE deben estar en df (WEDDING BANDS)
+        filtro = (df["NAME"] == modelo)
+        
+        anchos = sorted(df.loc[filtro, "ANCHO"].astype(str).str.strip().unique().tolist())
+        tallas = sorted(df.loc[filtro, "SIZE"].astype(str).str.strip().unique().tolist(), 
                               key=lambda x: (re.sub(r'\D', '', x), x)) 
         return anchos, tallas
 
@@ -197,50 +200,59 @@ def formulario():
     anchos_c, tallas_c = get_options(modelo_cab)
 
     # --- Función de Búsqueda de Peso y Costo ---
-    def obtener_peso_y_costo(modelo, metal, ancho, talla):
+    def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla):
         # Comprobación de DataFrames vacíos antes de buscar
-        if df.empty or df_size.empty or not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar'].upper():
-            return 0, 0
+        if df.empty or not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar'].upper():
+            return 0, 0, 0 # peso, cost_fijo, cost_adicional
             
-        # 1. Buscar el PESO en df_size
-        filtro_peso = (df_size["NAME"] == modelo) & \
-                      (df_size["ANCHO"] == ancho) & \
-                      (df_size["SIZE"] == talla)
+        # 1. Buscar el PESO y COSTO FIJO en df (WEDDING BANDS)
+        filtro_base = (df["NAME"] == modelo) & \
+                      (df["ANCHO"] == ancho) & \
+                      (df["SIZE"] == talla) & \
+                      (df["METAL"] == metal)
         
         peso = 0
-        if not df_size.loc[filtro_peso].empty:
-            peso_fila = df_size.loc[filtro_peso].iloc[0]
-            peso = peso_fila.get("PESO_AJUSTADO", peso_fila.get("PESO", 0))
+        price_cost = 0 # Costo Fijo
+        
+        if not df.loc[filtro_base].empty:
+            base_fila = df.loc[filtro_base].iloc[0]
+            peso = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0))
+            price_cost = base_fila.get("PRICE COST", 0) 
             try: peso = float(peso)
             except: peso = 0
-
-        # 2. Buscar el COSTO FIJO en df
-        filtro_costo = (df["NAME"] == modelo) & \
-                       (df["METAL"] == metal)
-        
-        price_cost = 0
-        if not df.loc[filtro_costo].empty:
-            costo_fila = df.loc[filtro_costo].iloc[0]
-            price_cost = costo_fila.get("PRICE COST", 0) 
             try: price_cost = float(price_cost)
             except: price_cost = 0
 
-        return peso, price_cost
+        # 2. Buscar el COSTO ADICIONAL en df_adicional_local (Hoja SIZE)
+        cost_adicional = 0
+        if not df_adicional_local.empty:
+            # Buscar por la talla seleccionada (columna renombrada a TALLA_ADICIONAL)
+            filtro_adicional = (df_adicional_local["TALLA_ADICIONAL"] == talla) 
+            
+            if not df_adicional_local.loc[filtro_adicional].empty:
+                adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
+                cost_adicional = adicional_fila.get("ADICIONAL", 0)
+                try: cost_adicional = float(cost_adicional)
+                except: cost_adicional = 0
+
+        return peso, price_cost, cost_adicional
 
     # --- Cálculo dama ---
-    peso_dama, cost_dama = obtener_peso_y_costo(modelo_dama, metal_dama, ancho_dama, talla_dama)
+    peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama)
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
-        monto_dama = monto_oro_dama + cost_dama
+        # Monto Dama: Oro + Costo Fijo + Costo Adicional
+        monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama 
         monto_total += monto_dama
 
     # --- Cálculo caballero ---
-    peso_cab, cost_cab = obtener_peso_y_costo(modelo_cab, metal_cab, ancho_cab, talla_cab)
+    peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab)
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
-        monto_cab = monto_oro_cab + cost_cab
+        # Monto Caballero: Oro + Costo Fijo + Costo Adicional
+        monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
         monto_total += monto_cab
     # --------------------- Generación del HTML para el Formulario ---------------------
     
@@ -334,7 +346,7 @@ def formulario():
                     </p>
                     {selectores_dama}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado: $' + f'{monto_dama:,.2f}' + ' USD (Peso: ' + f'{peso_dama:,.2f}' + 'g)' if monto_dama > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado: $' + f'{monto_dama:,.2f}' + ' USD (Peso: ' + f'{peso_dama:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_dama:,.2f}' + ')' if monto_dama > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -346,7 +358,7 @@ def formulario():
                     </p>
                     {selectores_cab}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g)' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_cab:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -472,7 +484,6 @@ def catalogo():
     
     for modelo, data in catalogo_agrupado.items():
         nombre_foto = data['NOMBRE_FOTO']
-        # La función url_for('static', ...) crea la ruta web correcta: /static/nombre_foto.bmp
         ruta_web_foto = url_for('static', filename=nombre_foto) 
 
         html_catalogo += f"""
@@ -485,7 +496,6 @@ def catalogo():
                     """
         
         for metal in data['METALES']:
-            # La selección se guarda en mayúsculas
             valor_seleccion = f"{modelo};{metal}"
             
             html_catalogo += f"""
