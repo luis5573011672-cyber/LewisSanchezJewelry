@@ -424,25 +424,16 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    """Ruta del catálogo: selecciona Modelo y Metal. 
-    Permite múltiples selecciones (Dama y Caballero) antes de regresar al formulario.
+    """Ruta del catálogo: selecciona solo Modelo y Metal y vuelve al formulario.
+    Muestra una tarjeta por cada combinación única de Modelo y Metal (con su foto asociada).
     """
     df, _ = cargar_datos()
     
-    mensaje_exito = None  # Variable para mostrar un mensaje después de la selección
-    
-    # 1. Manejo del POST: Si se selecciona un producto, guardamos y permanecemos en el catálogo.
+    # 1. Manejo del POST: Si se selecciona un producto, guardamos y volvemos.
     if request.method == "POST":
         seleccion = request.form.get("seleccion")
         tipo = request.form.get("tipo")
         
-        # --- Lógica de Retorno al Formulario ---
-        # Si no hay 'seleccion' (es decir, se pulsó el botón de Volver), volvemos.
-        if not seleccion:
-            # Si se presiona "Volver al Formulario", regresamos con la bandera fresh_selection=True
-            return redirect(url_for("formulario", fresh_selection=True))
-        
-        # --- Lógica de Selección de Anillo ---
         if seleccion and tipo:
             try:
                 # El valor de 'seleccion' es "MODELO;METAL"
@@ -455,17 +446,14 @@ def catalogo():
                 # Al seleccionar un nuevo modelo, limpiamos las selecciones de ancho/talla de la sesión 
                 session[f"ancho_{tipo}"] = ""
                 session[f"talla_{tipo}"] = ""
-                
-                # Preparamos el mensaje de éxito para la siguiente renderización del catálogo
-                tipo_display = "Dama" if tipo == "dama" else "Caballero"
-                mensaje_exito = f"✅ ¡Modelo y Metal para {tipo_display} guardado! Seleccione el otro o presione 'Volver al Formulario'."
-                
-                # NO REDIRIGIR AQUÍ. Continuamos para renderizar el catálogo nuevamente.
-                
+
+                # Redirigir con un argumento para indicar que es una selección nueva
+                return redirect(url_for("formulario", fresh_selection=True))
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
-                mensaje_exito = "❌ Error al procesar la selección."
-
+        
+        # Si se presiona "Volver al Formulario" sin seleccionar nada, regresamos sin la bandera
+        return redirect(url_for("formulario"))
 
     # 2. Generación del catálogo
     idioma = session.get("idioma", "Español")
@@ -475,15 +463,9 @@ def catalogo():
         "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
         "volver": "Volver al Formulario" if es else "Back to Form",
         "dama": "Dama" if es else "Lady",
-        "caballero": "Caballero" if es else "Gentleman", # CORREGIDO: Sin comillas dobles extra
+        "caballero": "Caballero" if es else "Gentleman", # <<-- CORRECCIÓN APLICADA AQUÍ
         "metal": "Metal" if es else "Metal",
     }
-    
-    # Obtener selecciones actuales para mostrarlas en el catálogo
-    modelo_dama_actual = session.get("modelo_dama", "")
-    metal_dama_actual = session.get("metal_dama", "")
-    modelo_cab_actual = session.get("modelo_cab", "")
-    metal_cab_actual = session.get("metal_cab", "")
     
     if df.empty:
          html_catalogo = f"""
@@ -529,22 +511,16 @@ def catalogo():
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
-            .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); transition: all 0.2s; }}
-            .card.selected-dama {{ border: 3px solid #EC4899; }} /* Rosa */
-            .card.selected-cab {{ border: 3px solid #3B82F6; }} /* Azul */
-            .card.selected-both {{ border: 3px solid #10B981; }} /* Verde */
-            .selection-status {{ font-size: 0.75rem; font-weight: 600; margin-top: 4px; }}
+            .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }}
         </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
-            <h1 class="text-3xl font-extrabold mb-4 text-gray-800 text-center">{t['titulo']}</h1>
+            <h1 class="text-3xl font-extrabold mb-8 text-gray-800 text-center">{t['titulo']}</h1>
             
-            {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
-
             <form method="POST" action="{url_for('catalogo')}">
                 <div class="mb-8 text-center">
-                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150" name="volver_btn" value="true">
+                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150">
                         {t['volver']}
                     </button>
                 </div>
@@ -559,33 +535,15 @@ def catalogo():
         nombre_foto = item['nombre_foto']
         ruta_web_foto = url_for('static', filename=nombre_foto) 
         valor_seleccion = f"{modelo};{metal}"
-        
-        # --- Lógica de estado de selección para el Card ---
-        is_dama = modelo == modelo_dama_actual and metal == metal_dama_actual
-        is_cab = modelo == modelo_cab_actual and metal == metal_cab_actual
-        card_class = "card"
-        status_text = ""
-        
-        if is_dama and is_cab:
-            card_class += " selected-both"
-            status_text = "✅ Ambos seleccionados"
-        elif is_dama:
-            card_class += " selected-dama"
-            status_text = f"✅ {t['dama']} seleccionada"
-        elif is_cab:
-            card_class += " selected-cab"
-            status_text = f"✅ {t['caballero']} seleccionado"
-
 
         html_catalogo += f"""
-                    <div class="{card_class} p-4 flex flex-col items-center text-center">
+                    <div class="card p-4 flex flex-col items-center text-center">
                         <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
                              class="w-full h-auto max-h-48 object-contain rounded-lg mb-3" 
                              onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
                         >
                         <p class="text-xl font-bold text-gray-900 mb-1">{modelo}</p>
-                        <p class="text-md font-semibold text-indigo-700 mb-2">{t['metal']}: {metal}</p>
-                        <p class="selection-status text-green-600">{status_text}</p>
+                        <p class="text-md font-semibold text-indigo-700 mb-4">{t['metal']}: {metal}</p>
 
                         <div class="mt-2 space-y-3 w-full border-t pt-3">
                             <button type="submit" name="seleccion" value="{valor_seleccion}" 
