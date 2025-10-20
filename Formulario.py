@@ -4,14 +4,13 @@ import pandas as pd
 from flask import Flask, request, render_template_string, session, redirect, url_for
 import logging
 import re
-import math # Para la función obtener_precio_oro
+import math 
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
-# ¡IMPORTANTE! Clave secreta OBLIGATORIA para usar 'session'.
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing")
 
 EXCEL_PATH = "Formulario Catalogo.xlsm"
@@ -30,7 +29,6 @@ def obtener_precio_oro():
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
     
     try:
-        # Intento de conexión
         response = requests.get(url, headers=headers, timeout=5)
         response.raise_for_status()
         data = response.json()
@@ -44,7 +42,6 @@ def obtener_precio_oro():
         return DEFAULT_GOLD_PRICE, "fallback"
         
     except (requests.exceptions.RequestException, Exception) as e:
-        # Esto captura el error 429 (Too Many Requests) o errores de conexión.
         logging.error(f"Error al obtener precio del oro: {e}. Usando fallback.")
         return DEFAULT_GOLD_PRICE, "fallback"
 
@@ -53,7 +50,6 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
     if valor_onza is None or valor_onza == 0 or peso_gramos is None or peso_gramos == 0:
         return 0, 0
     
-    # Conversión: Onza a Gramo (1 onza = 31.1035 gramos)
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
     monto_total = valor_gramo * peso_gramos
     return valor_gramo, monto_total
@@ -64,11 +60,9 @@ def cargar_datos():
         df = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=1)
         df_size = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl")
         
-        # Limpieza de encabezados de columnas
         df.columns = df.columns.str.strip()
         df_size.columns = df_size.columns.str.strip()
         
-        # Limpieza de valores clave
         for col in ["NAME", "METAL", "Ruta Foto"]:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -83,11 +77,12 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame()
 
 def obtener_nombre_archivo_imagen(ruta_completa):
-    """Extrae solo el nombre del archivo del path, lo limpia y lo pone en minúsculas."""
+    """Extrae solo el nombre del archivo del path y lo limpia. Ya NO fuerza minúsculas."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return None
-    nombre_archivo = os.path.basename(str(ruta_completa)).lower()
-    return nombre_archivo.replace('%20', ' ')
+    # CORRECCIÓN: os.path.basename NO DEBE LLEVAR .lower() para evitar problemas en Linux/Render.
+    nombre_archivo = os.path.basename(str(ruta_completa)) 
+    return nombre_archivo.replace('%20', ' ').strip() # Limpiamos espacios y posibles URL encodings
 
 # --------------------- RUTAS FLASK CORREGIDAS ---------------------
 
@@ -98,7 +93,6 @@ def formulario():
     df, df_size = cargar_datos()
     precio_onza, status = obtener_precio_oro()
 
-    # CORRECCIÓN CLAVE: Inicializar monto_total a 0.0 para evitar UnboundLocalError
     monto_total = 0.0
 
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
@@ -115,31 +109,40 @@ def formulario():
         "monto": "Monto total del presupuesto" if es else "Total estimate amount",
         "dama": "Dama" if es else "Lady",
         "cab": "Caballero" if es else "Gentleman",
-        "catalogo_btn": "Abrir Catálogo" if es else "Open Catalog"
+        "catalogo_btn": "Abrir Catálogo" if es else "Open Catalog",
+        "cliente_datos": "Datos del Cliente" if es else "Client Details",
+        "nombre": "Nombre del Cliente" if es else "Client Name",
+        "email": "Email de Contacto" if es else "Contact Email"
     }
     
-    # 1. Obtener selecciones del Catálogo (Modelo y Metal)
+    # --- 1. Obtener/Establecer Datos del Cliente ---
+    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
+    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
+
+    # --- 2. Obtener Selecciones de Anillo (Modelo, Metal, Kilates, Ancho, Talla) ---
     modelo_dama = session.get("modelo_dama", t['seleccionar'])
     metal_dama = session.get("metal_dama", "")
     
     modelo_cab = session.get("modelo_cab", t['seleccionar'])
     metal_cab = session.get("metal_cab", "")
     
-    # 2. Obtener Kilates, Ancho y Talla del formulario POST o de la sesión
-    kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14")) # Valor por defecto
+    kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
     
-    kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14")) # Valor por defecto
+    kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
     ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
     talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
 
     if request.method == "POST":
-        # Guardar todas las selecciones de variables de cálculo
+        # Guardar datos del cliente
+        session["nombre_cliente"] = nombre_cliente
+        session["email_cliente"] = email_cliente
+        
+        # Guardar selecciones de cálculo
         session["kilates_dama"] = kilates_dama
         session["ancho_dama"] = ancho_dama
         session["talla_dama"] = talla_dama
-        
         session["kilates_cab"] = kilates_cab
         session["ancho_cab"] = ancho_cab
         session["talla_cab"] = talla_cab
@@ -147,6 +150,7 @@ def formulario():
         if "idioma" in request.form:
             return redirect(url_for("formulario"))
 
+    # ... (Resto de funciones get_options, obtener_peso_y_costo y cálculos, son correctas) ...
     # --- Opciones disponibles (se basan en los modelos seleccionados) ---
     def get_options(modelo):
         if modelo == t['seleccionar']:
@@ -184,7 +188,6 @@ def formulario():
         
         price_cost = 0
         if not df.loc[filtro_costo].empty:
-            # Tomamos la primera coincidencia
             costo_fila = df.loc[filtro_costo].iloc[0]
             price_cost = costo_fila.get("PRICE COST", 0)
             try: price_cost = float(price_cost)
@@ -196,7 +199,6 @@ def formulario():
     peso_dama, cost_dama = obtener_peso_y_costo(modelo_dama, metal_dama, ancho_dama, talla_dama)
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
-        # Se calcula el valor del oro usando el KILATE seleccionado en el formulario.
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
         monto_dama = monto_oro_dama + cost_dama
         monto_total += monto_dama
@@ -205,17 +207,14 @@ def formulario():
     peso_cab, cost_cab = obtener_peso_y_costo(modelo_cab, metal_cab, ancho_cab, talla_cab)
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
-        # Se calcula el valor del oro usando el KILATE seleccionado en el formulario.
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
         monto_cab = monto_oro_cab + cost_cab
         monto_total += monto_cab
-
     # --------------------- Generación del HTML para el Formulario ---------------------
     
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # Asegurar que el ancho y talla actuales estén en las opciones disponibles o usar el primero
         if anchos and ancho_actual not in anchos: ancho_actual = anchos[0]
         if tallas and talla_actual not in tallas: talla_actual = tallas[0]
 
@@ -233,7 +232,6 @@ def formulario():
             if modelo != t['seleccionar'] and (not anchos or not tallas):
                 warning_msg = f'<p class="text-red-500 pt-3">No hay datos de Ancho/Talla en Excel para este modelo.</p>'
             
-            # Devolvemos solo el selector de kilates y la advertencia
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
         html = f"""
@@ -261,6 +259,7 @@ def formulario():
     precio_oro_status = f"Precio Oro Onza: ${precio_onza:,.2f} USD ({status.upper()})"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     
+    # Se añade la sección de Datos del Cliente en el HTML
     html_form = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
@@ -281,6 +280,20 @@ def formulario():
             <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
 
             <form method="POST" action="/" class="space-y-4">
+                
+                <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['cliente_datos']}</h2>
+                <div class="bg-gray-100 p-4 rounded-lg space-y-4 mb-6">
+                    <div>
+                        <label for="nombre_cliente" class="block text-sm font-medium text-gray-700 mb-1">{t['nombre']}</label>
+                        <input type="text" id="nombre_cliente" name="nombre_cliente" value="{nombre_cliente}" 
+                               class="w-full p-2 border border-gray-300 rounded-lg" required>
+                    </div>
+                    <div>
+                        <label for="email_cliente" class="block text-sm font-medium text-gray-700 mb-1">{t['email']}</label>
+                        <input type="email" id="email_cliente" name="email_cliente" value="{email_cliente}"
+                               class="w-full p-2 border border-gray-300 rounded-lg">
+                    </div>
+                </div>
                 <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
                 <div class="bg-pink-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
@@ -340,7 +353,6 @@ def catalogo():
         
         if seleccion and tipo:
             try:
-                # El valor del botón ahora es: 'MODELO;METAL'
                 modelo, metal = seleccion.split(";")
                 session[f"modelo_{tipo}"] = modelo
                 session[f"metal_{tipo}"] = metal
@@ -355,7 +367,6 @@ def catalogo():
     idioma = session.get("idioma", "Español")
     es = idioma == "Español"
     
-    # Traducciones para el catálogo
     t = {
         "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
         "volver": "Volver al Formulario" if es else "Back to Form",
@@ -364,7 +375,6 @@ def catalogo():
         "metal": "Metal" if es else "Metal",
     }
 
-    # Preparar el catálogo (limpiar N/A)
     df_catalogo = df[["NAME", "METAL", "Ruta Foto"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
     df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
 
@@ -382,7 +392,7 @@ def catalogo():
     for modelo in catalogo_agrupado:
         catalogo_agrupado[modelo]["METALES"] = sorted(list(catalogo_agrupado[modelo]["METALES"]))
     
-    # --------------------- HTML/JINJA2 para el Catálogo (Corregido) ---------------------
+    # --------------------- HTML/JINJA2 para el Catálogo ---------------------
     
     html_catalogo = f"""
     <!DOCTYPE html>
@@ -414,8 +424,6 @@ def catalogo():
     
     for modelo, data in catalogo_agrupado.items():
         nombre_foto = data['NOMBRE_FOTO']
-        # ESTA LÍNEA ASEGURA LA RUTA CORRECTA A LA CARPETA 'STATIC'
-        # Nota: Asume que tienes una carpeta 'static' en tu directorio de Flask con las imágenes.
         ruta_web_foto = url_for('static', filename=nombre_foto)
 
         html_catalogo += f"""
@@ -428,7 +436,7 @@ def catalogo():
                     """
         
         for metal in data['METALES']:
-            valor_seleccion = f"{modelo};{metal}" # SOLO MODELO Y METAL
+            valor_seleccion = f"{modelo};{metal}"
             
             html_catalogo += f"""
                             <div class="bg-gray-50 p-3 rounded-lg border">
