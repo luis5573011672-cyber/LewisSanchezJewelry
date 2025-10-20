@@ -57,21 +57,26 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
     return valor_gramo, monto_total
 
 def cargar_datos():
-    """Carga los DataFrames desde el archivo Excel."""
+    """Carga los DataFrames desde el archivo Excel y normaliza los encabezados."""
     try:
         df = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=1) 
         df_size = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl")
         
-        # Limpieza inicial de espacios en encabezados
+        # Limpieza de espacios en encabezados
         df.columns = df.columns.str.strip()
         df_size.columns = df_size.columns.str.strip()
         
-        # Limpieza de valores clave (Usando la capitalización EXACTA del Excel: 'Ruta Foto', 'NAME')
-        for col in ["NAME", "METAL", "Ruta Foto"]: 
+        # 🚨 CORRECCIÓN CLAVE: CONVERTIR TODOS LOS ENCABEZADOS A MAYÚSCULAS para consistencia
+        # Esto soluciona los errores 'KeyError' por capitalización inconsistente (ej: 'Name' vs 'NAME')
+        df.columns = df.columns.str.upper()
+        df_size.columns = df_size.columns.str.upper()
+        
+        # Limpieza de valores clave (¡Ahora buscamos solo en MAYÚSCULAS!)
+        # Si tu columna de foto se llama "Ruta Foto", ahora se busca como "RUTA FOTO"
+        for col in ["NAME", "METAL", "RUTA FOTO"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             
-        # Limpieza de valores clave (Usando la capitalización EXACTA del Excel: 'NAME', 'SIZE')
         for col in ["NAME", "ANCHO", "SIZE"]:
             if col in df_size.columns:
                 df_size[col] = df_size[col].astype(str).str.strip()
@@ -87,7 +92,7 @@ def obtener_nombre_archivo_imagen(ruta_completa):
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return None
     
-    # 🚨 CORRECCIÓN CLAVE: Reemplaza \ con / para que os.path.basename funcione en Linux/Render.
+    # CORRECCIÓN: Reemplaza \ con / para que os.path.basename funcione correctamente en Linux/Render.
     ruta_limpia = str(ruta_completa).replace('\\', '/')
     
     # Extrae solo el nombre del archivo
@@ -132,11 +137,12 @@ def formulario():
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
     # --- 2. Obtener Selecciones de Anillo (Modelo, Metal, Kilates, Ancho, Talla) ---
-    modelo_dama = session.get("modelo_dama", t['seleccionar'])
-    metal_dama = session.get("metal_dama", "")
+    # NOTA: Los modelos y metales en sesión ya están en MAYÚSCULAS
+    modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
+    metal_dama = session.get("metal_dama", "").upper()
     
-    modelo_cab = session.get("modelo_cab", t['seleccionar'])
-    metal_cab = session.get("metal_cab", "")
+    modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
+    metal_cab = session.get("metal_cab", "").upper()
     
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
@@ -164,9 +170,11 @@ def formulario():
 
     # --- Opciones disponibles (se basan en los modelos seleccionados) ---
     def get_options(modelo):
-        if modelo == t['seleccionar']:
+        # Buscamos en mayúsculas
+        if modelo == t['seleccionar'].upper():
             return [], []
         filtro_size = (df_size["NAME"] == modelo)
+        # Las columnas ANCHO y SIZE ya están en mayúsculas.
         anchos = sorted(df_size.loc[filtro_size, "ANCHO"].astype(str).str.strip().unique().tolist())
         # Ordena las tallas numéricamente
         tallas = sorted(df_size.loc[filtro_size, "SIZE"].astype(str).str.strip().unique().tolist(), 
@@ -178,10 +186,11 @@ def formulario():
 
     # --- Función de Búsqueda de Peso y Costo ---
     def obtener_peso_y_costo(modelo, metal, ancho, talla):
-        if not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar']:
+        if not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar'].upper():
             return 0, 0
             
         # 1. Buscar el PESO en df_size (por Modelo, Ancho, y Talla)
+        # Buscamos con los nombres de columna en MAYÚSCULAS
         filtro_peso = (df_size["NAME"] == modelo) & \
                       (df_size["ANCHO"] == ancho) & \
                       (df_size["SIZE"] == talla)
@@ -194,13 +203,14 @@ def formulario():
             except: peso = 0
 
         # 2. Buscar el COSTO FIJO en df (solo por Modelo y Metal)
+        # Buscamos con los nombres de columna en MAYÚSCULAS
         filtro_costo = (df["NAME"] == modelo) & \
                        (df["METAL"] == metal)
         
         price_cost = 0
         if not df.loc[filtro_costo].empty:
             costo_fila = df.loc[filtro_costo].iloc[0]
-            price_cost = costo_fila.get("PRICE COST", 0)
+            price_cost = costo_fila.get("PRICE COST", 0) # Asumiendo que esta columna sigue el patrón
             try: price_cost = float(price_cost)
             except: price_cost = 0
 
@@ -238,9 +248,9 @@ def formulario():
             </div>
         """
 
-        if modelo == t['seleccionar'] or not anchos or not tallas:
+        if modelo == t['seleccionar'].upper() or not anchos or not tallas:
             warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo/metal para habilitar Ancho y Talla.</p>'
-            if modelo != t['seleccionar'] and (not anchos or not tallas):
+            if modelo != t['seleccionar'].upper() and (not anchos or not tallas):
                 warning_msg = f'<p class="text-red-500 pt-3">No hay datos de Ancho/Talla en Excel para este modelo.</p>'
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
@@ -365,8 +375,9 @@ def catalogo():
         if seleccion and tipo:
             try:
                 modelo, metal = seleccion.split(";")
-                session[f"modelo_{tipo}"] = modelo
-                session[f"metal_{tipo}"] = metal
+                # Guardamos los valores en MAYÚSCULAS en la sesión
+                session[f"modelo_{tipo}"] = modelo.upper()
+                session[f"metal_{tipo}"] = metal.upper()
                 
                 return redirect(url_for("formulario"))
             except ValueError:
@@ -386,12 +397,13 @@ def catalogo():
         "metal": "Metal" if es else "Metal",
     }
 
-    # 🚨 CORRECCIÓN: Usar capitalización exacta 'Ruta Foto' para evitar KeyError
-    df_catalogo = df[["NAME", "METAL", "Ruta Foto"]].dropna(subset=["NAME", "METAL", "Ruta Foto"])
-    df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
+    # 🚨 CORRECCIÓN: Usamos solo MAYÚSCULAS ('RUTA FOTO') para consistencia
+    df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
+    df_catalogo["NOMBRE_FOTO"] = df_catalogo["RUTA FOTO"].apply(obtener_nombre_archivo_imagen)
 
     catalogo_agrupado = {}
     for _, fila in df_catalogo.iterrows():
+        # Los valores ya están en MAYÚSCULAS gracias a cargar_datos()
         modelo = str(fila["NAME"]).strip()
         metal = str(fila["METAL"]).strip()
         nombre_foto = fila["NOMBRE_FOTO"]
@@ -449,6 +461,7 @@ def catalogo():
                     """
         
         for metal in data['METALES']:
+            # La selección se guarda en mayúsculas
             valor_seleccion = f"{modelo};{metal}"
             
             html_catalogo += f"""
