@@ -57,29 +57,28 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
     return valor_gramo, monto_total
 
 def cargar_datos():
-    """Carga los DataFrames desde el archivo Excel y FUERZA la asignación de encabezados."""
+    """Carga los DataFrames desde el archivo Excel y FUERZA la asignación de encabezados
+       manejando la asimetría de las hojas (WEDDING BANDS en Fila 2, SIZE en Fila 1)."""
     try:
-        # Cargar sin encabezado para inspeccionar las filas
+        # 1. Cargar la hoja WEDDING BANDS (Encabezados en la Fila 2 -> índice 1)
+        # La tabla comienza en Fila 3 (índice 2)
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
+        
+        # Leemos los encabezados de la fila de índice 1 (Fila 2)
+        new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
+        
+        # Asignar encabezados y empezar el DataFrame desde la Fila 3 (índice 2)
+        df = df_raw.iloc[2:].copy()
+        df.columns = new_columns_df
+        
+        # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0)
+        # La tabla comienza en Fila 2 (índice 1)
         df_size_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         
-        # --- PROCESAR df (WEDDING BANDS) ---
-        # Fila 1 (índice 1) contiene los encabezados.
-        new_columns = df_raw.iloc[1].astype(str).str.strip().str.upper()
-        
-        # Si la columna 'NAME' es el problema, su valor aquí será el que Pandas está leyendo.
-        # Imprimir para depurar:
-        # logging.info(f"Encabezados leídos para DF: {new_columns.tolist()}") 
-        
-        # Asignar los nuevos encabezados y eliminar la fila de encabezados duplicada
-        df = df_raw.iloc[2:].copy()
-        df.columns = new_columns
-        
-        # --- PROCESAR df_size (SIZE) ---
-        # Fila 0 (índice 0) contiene los encabezados.
+        # Leemos los encabezados de la fila de índice 0 (Fila 1)
         new_columns_size = df_size_raw.iloc[0].astype(str).str.strip().str.upper()
         
-        # Asignar los nuevos encabezados y eliminar la fila de encabezados duplicada
+        # Asignar encabezados y empezar el DataFrame desde la Fila 2 (índice 1)
         df_size = df_size_raw.iloc[1:].copy()
         df_size.columns = new_columns_size
 
@@ -94,7 +93,6 @@ def cargar_datos():
             
         return df, df_size
     except Exception as e:
-        # Esto imprimirá el error completo, ayudando a ver si falla al cargar la hoja.
         logging.error(f"Error CRÍTICO al leer el archivo Excel y asignar encabezados: {e}") 
         return pd.DataFrame(), pd.DataFrame()
 
