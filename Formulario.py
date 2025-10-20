@@ -60,12 +60,17 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
     monto_total = valor_gramo * peso_gramos
     return valor_gramo, monto_total
 
+# --------------------- CARGAR DATOS  ---------------------
+
+# Contenido de la función cargar_datos()
+
 def cargar_datos():
     """
     Carga los DataFrames con las correcciones de nombres de columna.
     La columna SIZE no existe en WEDDING BANDS (df).
     """
     global df_global, df_adicional_global
+    # 🚨 Lógica de caché: Si ya están cargados, los devuelve inmediatamente.
     if not df_global.empty and not df_adicional_global.empty:
         return df_global, df_adicional_global
 
@@ -80,6 +85,8 @@ def cargar_datos():
         if 'WIDTH' in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
+        # 🚨 CORRECCIÓN 2: Se ELIMINA cualquier intento de renombrar COLUMNA1 o CT a SIZE en df.
+        
         # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0) para Costos Adicionales
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         new_columns_adicional = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
@@ -87,12 +94,10 @@ def cargar_datos():
         df_adicional.columns = new_columns_adicional
         
         # 3. Limpieza de valores clave
-        # Limpieza en DF principal. NO se incluye 'SIZE'.
         for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             
-        # Limpieza en DF adicional. Mantenemos 'SIZE' y 'ADICIONAL'.
         for col in ["SIZE", "ADICIONAL"]: 
             if col in df_adicional.columns:
                 df_adicional[col] = df_adicional[col].astype(str).str.strip()
@@ -109,7 +114,9 @@ def cargar_datos():
     except Exception as e:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame()
-    
+
+# --------------------- FIN CARGAR DATOS ---------------------
+
 
 def obtener_nombre_archivo_imagen(ruta_completa):
     """Extrae solo el nombre del archivo del path y maneja barras invertidas de Windows."""
