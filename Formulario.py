@@ -82,7 +82,7 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame()
 
 def obtener_nombre_archivo_imagen(ruta_completa):
-    """Extrae el nombre del archivo del path y lo limpia."""
+    """Extrae solo el nombre del archivo del path, lo limpia y lo pone en minúsculas."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return None
     nombre_archivo = os.path.basename(str(ruta_completa)).lower()
@@ -180,6 +180,7 @@ def formulario():
         
         price_cost = 0
         if not df.loc[filtro_costo].empty:
+            # Tomamos la primera coincidencia
             costo_fila = df.loc[filtro_costo].iloc[0] 
             price_cost = costo_fila.get("PRICE COST", 0)
             try: price_cost = float(price_cost)
@@ -191,6 +192,7 @@ def formulario():
     peso_dama, cost_dama = obtener_peso_y_costo(modelo_dama, metal_dama, ancho_dama, talla_dama)
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
+        # Se calcula el valor del oro usando el KILATE seleccionado en el formulario.
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
         monto_dama = monto_oro_dama + cost_dama
         monto_total += monto_dama
@@ -199,6 +201,7 @@ def formulario():
     peso_cab, cost_cab = obtener_peso_y_costo(modelo_cab, metal_cab, ancho_cab, talla_cab)
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
+        # Se calcula el valor del oro usando el KILATE seleccionado en el formulario.
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
         monto_cab = monto_oro_cab + cost_cab
         monto_total += monto_cab
@@ -375,7 +378,7 @@ def catalogo():
     for modelo in catalogo_agrupado:
         catalogo_agrupado[modelo]["METALES"] = sorted(list(catalogo_agrupado[modelo]["METALES"]))
     
-    # --------------------- HTML/JINJA2 para el Catálogo (Actualizado) ---------------------
+    # --------------------- HTML/JINJA2 para el Catálogo (Corregido) ---------------------
     
     html_catalogo = f"""
     <!DOCTYPE html>
@@ -407,7 +410,7 @@ def catalogo():
     
     for modelo, data in catalogo_agrupado.items():
         nombre_foto = data['NOMBRE_FOTO']
-        # La ruta debe ser relativa al folder 'static'
+        # ESTA LÍNEA ASEGURA LA RUTA CORRECTA A LA CARPETA 'STATIC'
         ruta_web_foto = url_for('static', filename=nombre_foto)
 
         html_catalogo += f"""
@@ -420,7 +423,7 @@ def catalogo():
                     """
         
         for metal in data['METALES']:
-            valor_seleccion = f"{modelo};{metal}" # ¡SOLO MODELO Y METAL!
+            valor_seleccion = f"{modelo};{metal}" # SOLO MODELO Y METAL
             
             html_catalogo += f"""
                             <div class="bg-gray-50 p-3 rounded-lg border">
