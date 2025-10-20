@@ -2,7 +2,6 @@ import requests
 import os
 import pandas as pd
 from flask import Flask, jsonify, request, render_template_string, session, redirect, url_for
-import re # Necesario para la limpieza de rutas de archivo
 
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
@@ -15,9 +14,9 @@ EXCEL_PATH = "Formulario Catalogo.xlsm"
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 
 # Precio de respaldo (fallback) en caso de que la API de Oro falle o exceda límites.
-DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza
+DEFAULT_GOLD_PRICE = 2000.00 # USD por Onza
 
-# --------------------- FUNCIONES DE UTILIDAD CORREGIDAS ---------------------
+# --------------------- FUNCIONES DE UTILIDAD ---------------------
 
 def obtener_precio_oro():
     """
@@ -25,7 +24,7 @@ def obtener_precio_oro():
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
     # CLAVE API PROPORCIONADA POR EL USUARIO (la que está dando 403 Forbidden):
-    API_KEY = "goldapi-4g9e8p719mgvhiccl-io" 
+    API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
     
@@ -33,6 +32,7 @@ def obtener_precio_oro():
         response = requests.get(url, headers=headers, timeout=5)
         
         # Si hay un error 4xx o 5xx, se lanza una excepción aquí.
+        # Esto captura tu error 403 Forbidden.
         response.raise_for_status() 
         
         data = response.json()
@@ -98,26 +98,8 @@ def cargar_datos():
         print(f"Error al leer el archivo Excel: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-def obtener_nombre_archivo_imagen(ruta_completa):
-    """
-    Extrae el nombre del archivo del path completo.
-    Esto es crucial para que Flask pueda servir la imagen desde la carpeta 'static'.
-    """
-    if pd.isna(ruta_completa) or ruta_completa is None:
-        return None
-    ruta_str = str(ruta_completa).strip()
-    if not ruta_str:
-        return None
-        
-    # Limpia la ruta para asegurar que solo quede el nombre del archivo
-    # Esto maneja rutas de Windows (\\) y Linux/Web (/)
-    nombre_archivo = os.path.basename(ruta_str)
-    
-    # Limpieza adicional: a veces el Excel tiene caracteres extraños o URL-encoded
-    # Simplemente devuelve el nombre del archivo limpio.
-    return nombre_archivo.replace('%20', ' ')
 
-# --------------------- RUTAS FLASK CORREGIDAS ---------------------
+# --------------------- RUTAS FLASK ---------------------
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
@@ -126,12 +108,13 @@ def formulario():
     Maneja la lógica de cálculo y la presentación del formulario.
     """
     df, _ = cargar_datos()
+    # Ahora, obtener_precio_oro devuelve el precio y el estado
     precio_onza, status = obtener_precio_oro()
 
     # Manejar el idioma desde la sesión
-    idioma = request.form.get("idioma", session.get("idioma", "Español"))
-    session["idioma"] = idioma
+    idioma = session.get("idioma", "Español")
     es = idioma == "Español"
+    session["idioma"] = idioma # Asegura que la sesión se actualice
 
     t = {
         "titulo": "Formulario de Presupuesto u Orden" if es else "Estimate or Work Order Form",
@@ -144,7 +127,6 @@ def formulario():
         "catalogo_btn": "Abrir Catálogo" if es else "Open Catalog",
         "guardar": "Guardar" if es else "Save",
         "monto": "Monto total del presupuesto" if es else "Total estimate amount",
-        "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option"
     }
     
     # Inicializar/Obtener datos de la sesión (selecciones del catálogo)
@@ -154,32 +136,27 @@ def formulario():
     direccion = request.form.get("direccion", "")
     
     # Obtener modelos de la sesión (vienen de /catalogo)
-    modelo_dama = session.get("modelo_dama", t['seleccionar'])
+    modelo_dama = session.get("modelo_dama", "")
     metal_dama = session.get("metal_dama", "")
-    kilates_dama = session.get("kilates_dama", "") # Nuevo: Guardar los kilates seleccionados
     
-    modelo_cab = session.get("modelo_cab", t['seleccionar'])
+    modelo_cab = session.get("modelo_cab", "")
     metal_cab = session.get("metal_cab", "")
-    kilates_cab = session.get("kilates_cab", "") # Nuevo: Guardar los kilates seleccionados
     
     # Si el método es POST (envío del formulario), guardamos los datos del cliente
     if request.method == "POST":
-        # Nota: El idioma ya se actualizó al inicio de la función.
-        # En una aplicación real, aquí guardarías la orden en la base de datos o archivo.
-        
-        # El redirect aquí es importante si se cambió el idioma
-        if "idioma" in request.form:
-             return redirect(url_for("formulario")) 
+        # Lógica para guardar los datos del cliente, si es necesario.
+        # Por ahora, solo actualiza las variables para la recarga del formulario.
+        idioma = request.form.get("idioma", "Español")
+        session["idioma"] = idioma
+        return redirect(url_for("formulario")) # Redirigir para limpiar el POST y actualizar idioma/cálculos
 
     monto_total = 0.0
 
     # --- Cálculo dama ---
-    monto_dama = 0.0
-    if modelo_dama != t['seleccionar'] and metal_dama and kilates_dama:
-        # Filtra por el modelo, metal y kilates seleccionados
+    if modelo_dama:
+        # Filtra por el modelo seleccionado en el catálogo
         filtro = (df["NAME"].astype(str).str.strip() == modelo_dama) & \
-                 (df["METAL"].astype(str).str.strip() == metal_dama) & \
-                 (df["CARAT"].astype(str).str.strip() == kilates_dama)
+                 (df["METAL"].astype(str).str.strip() == metal_dama)
         
         if not df.loc[filtro].empty:
             fila = df.loc[filtro].iloc[0]
@@ -187,17 +164,14 @@ def formulario():
             kilates = str(fila.get("CARAT", 0))
             price_cost = fila.get("PRICE COST", 0) # Costo de fabricación/diamantes, etc.
             
-            _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates, 0), peso)
-            monto_dama = monto_oro_dama + price_cost
-            monto_total += monto_dama
+            _, monto_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates, 0), peso)
+            monto_total += monto_dama + price_cost
 
     # --- Cálculo caballero ---
-    monto_cab = 0.0
-    if modelo_cab != t['seleccionar'] and metal_cab and kilates_cab:
-        # Filtra por el modelo, metal y kilates seleccionados
+    if modelo_cab:
+        # Filtra por el modelo seleccionado en el catálogo
         filtro = (df["NAME"].astype(str).str.strip() == modelo_cab) & \
-                 (df["METAL"].astype(str).str.strip() == metal_cab) & \
-                 (df["CARAT"].astype(str).str.strip() == kilates_cab)
+                 (df["METAL"].astype(str).str.strip() == metal_cab)
                  
         if not df.loc[filtro].empty:
             fila = df.loc[filtro].iloc[0]
@@ -205,11 +179,11 @@ def formulario():
             kilates = str(fila.get("CARAT", 0))
             price_cost = fila.get("PRICE COST", 0)
             
-            _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates, 0), peso)
-            monto_cab = monto_oro_cab + price_cost
-            monto_total += monto_cab
+            _, monto_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates, 0), peso)
+            monto_total += monto_cab + price_cost
 
     # --------------------- HTML/JINJA2 para el Formulario ---------------------
+    # Uso de Tailwind CSS para un diseño limpio y responsive
     
     # Mensaje de estado del oro (Actualizado para mostrar el estado)
     if status == "live" and precio_onza is not None:
@@ -248,6 +222,7 @@ def formulario():
             <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
 
             <form method="POST" action="/" class="space-y-4">
+                <!-- Selectores de Idioma y Cliente -->
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0">
                     <div class="w-full md:w-1/3">
                         <label for="idioma" class="block text-sm font-medium text-gray-700 mb-1">Idioma / Language</label>
@@ -278,27 +253,16 @@ def formulario():
                     <input type="text" id="direccion" name="direccion" value="{direccion}">
                 </div>
                 
+                <!-- Sección de Modelos Seleccionados -->
                 <h2 class="text-xl font-semibold pt-4 text-indigo-700">Modelos de Anillos</h2>
                 <div class="bg-indigo-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
                         {t['modelo_dama']}: 
-                        <span class="font-bold text-gray-900">
-                            {modelo_dama} 
-                            {' (' + metal_dama + ' ' + kilates_dama + 'K)' if metal_dama and kilates_dama else ''}
-                        </span>
-                        <span class="text-xs text-gray-500">
-                            {' - Monto Oro y Costo: $' + f'{monto_dama:,.2f}' + ' USD' if monto_dama > 0 else ''}
-                        </span>
+                        <span class="font-bold text-gray-900">{modelo_dama} ({metal_dama})</span>
                     </p>
                     <p class="text-sm font-medium text-gray-700">
                         {t['modelo_cab']}: 
-                        <span class="font-bold text-gray-900">
-                            {modelo_cab} 
-                            {' (' + metal_cab + ' ' + kilates_cab + 'K)' if metal_cab and kilates_cab else ''}
-                        </span>
-                        <span class="text-xs text-gray-500">
-                             {' - Monto Oro y Costo: $' + f'{monto_cab:,.2f}' + ' USD' if monto_cab > 0 else ''}
-                        </span>
+                        <span class="font-bold text-gray-900">{modelo_cab} ({metal_cab})</span>
                     </p>
                     
                     <a href="{url_for('catalogo')}" class="inline-block px-4 py-2 text-white bg-indigo-600 rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 text-sm font-semibold">
@@ -306,6 +270,7 @@ def formulario():
                     </a>
                 </div>
 
+                <!-- Resultado del Cálculo -->
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total:,.2f} USD</p>
@@ -328,7 +293,6 @@ def formulario():
 def catalogo():
     """
     Ruta para ver y seleccionar anillos del catálogo.
-    Corregida para agrupar por modelo y servir imágenes estáticas.
     """
     df, _ = cargar_datos()
     
@@ -340,87 +304,42 @@ def catalogo():
         "volver": "Volver al Formulario" if es else "Back to Form",
         "dama": "Dama" if es else "Lady",
         "caballero": "Caballero" if es else "Gentleman",
-        "seleccion_actual": "Selección actual" if es else "Current selection",
-        "metal": "Metal" if es else "Metal",
-        "kilates": "Kilates" if es else "Carat"
+        "seleccion_actual": "Selección actual" if es else "Current selection"
     }
     
     # Manejar el POST (cuando el usuario selecciona un anillo y pulsa guardar/volver)
     if request.method == "POST":
         # Las selecciones se guardan en la sesión para que las use la ruta '/'
-        # El valor de radio button es 'MODELO;METAL;KILATES'
-        if "seleccion_dama" in request.form and request.form["seleccion_dama"]:
-            try:
-                modelo, metal, kilates = request.form["seleccion_dama"].split(";")
-                session["modelo_dama"] = modelo
-                session["metal_dama"] = metal
-                session["kilates_dama"] = kilates
-            except ValueError:
-                # Si el formato no es el esperado, mantén la selección anterior
-                print("Advertencia: Formato de selección de dama incorrecto.")
+        if "seleccion_dama" in request.form:
+            modelo, metal = request.form["seleccion_dama"].split(";")
+            session["modelo_dama"] = modelo
+            session["metal_dama"] = metal
+        else: # Si el radio button no fue seleccionado (e.g. si no se tocó)
+            session["modelo_dama"] = session.get("modelo_dama", "")
+            session["metal_dama"] = session.get("metal_dama", "")
+            
+        if "seleccion_cab" in request.form:
+            modelo, metal = request.form["seleccion_cab"].split(";")
+            session["modelo_cab"] = modelo
+            session["metal_cab"] = metal
         else:
-             session.pop("modelo_dama", None)
-             session.pop("metal_dama", None)
-             session.pop("kilates_dama", None)
-
-        if "seleccion_cab" in request.form and request.form["seleccion_cab"]:
-            try:
-                modelo, metal, kilates = request.form["seleccion_cab"].split(";")
-                session["modelo_cab"] = modelo
-                session["metal_cab"] = metal
-                session["kilates_cab"] = kilates
-            except ValueError:
-                # Si el formato no es el esperado, mantén la selección anterior
-                print("Advertencia: Formato de selección de caballero incorrecto.")
-        else:
-            session.pop("modelo_cab", None)
-            session.pop("metal_cab", None)
-            session.pop("kilates_cab", None)
+            session["modelo_cab"] = session.get("modelo_cab", "")
+            session["metal_cab"] = session.get("metal_cab", "")
             
         # Redirigir al formulario principal después de guardar
         return redirect(url_for("formulario"))
 
     # Preparar el catálogo (limpiar N/A)
-    # Seleccionamos las columnas relevantes y quitamos las filas sin datos clave
-    df_catalogo = df[["NAME", "METAL", "Ruta Foto", "CARAT"]].dropna(subset=["NAME", "METAL", "Ruta Foto", "CARAT"])
-    
-    # Añadir la columna con el nombre de archivo de la imagen (¡CORRECCIÓN CLAVE!)
-    df_catalogo["NOMBRE_FOTO"] = df_catalogo["Ruta Foto"].apply(obtener_nombre_archivo_imagen)
-
-    # 1. Agrupar el catálogo por el nombre del modelo (NAME) para evitar duplicados.
-    catalogo_agrupado = {}
-    
-    for _, fila in df_catalogo.iterrows():
-        modelo = str(fila["NAME"]).strip()
-        metal = str(fila["METAL"]).strip()
-        carat = str(fila["CARAT"]).strip()
-        nombre_foto = fila["NOMBRE_FOTO"]
-        
-        if modelo not in catalogo_agrupado:
-            # Inicializa el modelo, usando la primera foto encontrada
-            catalogo_agrupado[modelo] = {
-                "NOMBRE_FOTO": nombre_foto,
-                "COMBINACIONES": []
-            }
-            
-        # Añadir la combinación específica (Metal y Kilates)
-        catalogo_agrupado[modelo]["COMBINACIONES"].append({
-            "METAL": metal,
-            "CARAT": carat,
-            "VALOR": f"{modelo};{metal};{carat}" # Valor completo para el radio button
-        })
+    catalogo = df[["NAME", "METAL", "Ruta Foto", "CARAT"]].dropna(subset=["NAME", "METAL", "Ruta Foto"]).to_dict(orient="records")
 
     # Obtener la selección actual para marcar los radio buttons
     modelo_dama_actual = session.get("modelo_dama", "")
     metal_dama_actual = session.get("metal_dama", "")
-    kilates_dama_actual = session.get("kilates_dama", "")
     
     modelo_cab_actual = session.get("modelo_cab", "")
     metal_cab_actual = session.get("metal_cab", "")
-    kilates_cab_actual = session.get("kilates_cab", "")
-    
+
     # --------------------- HTML/JINJA2 para el Catálogo ---------------------
-    
     html_catalogo = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
@@ -443,69 +362,61 @@ def catalogo():
 
             <form method="POST" action="{url_for('catalogo')}">
 
-                <div class="mb-8 flex flex-col sm:flex-row justify-between items-center bg-white p-4 card sticky top-0 z-10 space-y-3 sm:space-y-0">
+                <!-- Botones de Acción -->
+                <div class="mb-8 flex justify-between items-center bg-white p-4 card sticky top-0 z-10">
                     <div>
                         <h2 class="text-xl font-semibold text-indigo-700">{t['seleccion_actual']}:</h2>
                         <p class="text-sm">
-                            <span class="font-bold">Dama:</span> {modelo_dama_actual} ({metal_dama_actual} {kilates_dama_actual}K) | 
-                            <span class="font-bold">Caballero:</span> {modelo_cab_actual} ({metal_cab_actual} {kilates_cab_actual}K)
+                            <span class="font-bold">Dama:</span> {modelo_dama_actual} ({metal_dama_actual}) | 
+                            <span class="font-bold">Caballero:</span> {modelo_cab_actual} ({metal_cab_actual})
                         </p>
                     </div>
-                    <button type="submit" class="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150">
+                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150">
                         {t['volver']}
                     </button>
                 </div>
             
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <!-- Cuadrícula del Catálogo -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6">
                     """
     
-    # 2. Iterar sobre los modelos agrupados
-    for modelo, data in catalogo_agrupado.items():
-        nombre_foto = data['NOMBRE_FOTO']
-        # CORRECCIÓN CLAVE para la imagen: usar url_for('static', ...)
-        ruta_web_foto = url_for('static', filename=nombre_foto)
-
-        # Inicio de la tarjeta del modelo
+    for item in catalogo:
+        modelo = str(item['NAME']).strip()
+        metal = str(item['METAL']).strip()
+        carat = str(item.get('CARAT', '')).strip()
+        ruta_foto = item['Ruta Foto']
+        
+        # El valor de la selección será 'MODELO;METAL'
+        valor_seleccion = f"{modelo};{metal}"
+        
+        # Verificar si está actualmente seleccionado
+        is_dama_selected = (modelo == modelo_dama_actual and metal == metal_dama_actual)
+        is_cab_selected = (modelo == modelo_cab_actual and metal == metal_cab_actual)
+        
         html_catalogo += f"""
                     <div class="ring-card card p-4 flex flex-col items-center text-center">
-                        <img src="{ruta_web_foto}" alt="{modelo}" class="w-full h-auto max-h-48 object-contain rounded-lg mb-3" onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';">
+                        <!-- Imagen (Nota: Esto asume que la ruta funciona en el servidor) -->
+                        <img src="{ruta_foto}" alt="{modelo} {metal}" class="w-full h-auto rounded-lg mb-3 object-cover" onerror="this.onerror=null;this.src='https://placehold.co/200x200/cccccc/333333?text=No+Image'">
 
-                        <p class="text-xl font-bold text-gray-900 mb-4">{modelo}</p>
+                        <p class="text-lg font-semibold text-gray-900">{modelo}</p>
+                        <p class="text-sm text-gray-600">{metal} {carat}K</p>
 
-                        <div class="mt-2 space-y-3 w-full border-t pt-3">
-                            <p class="text-sm font-semibold text-indigo-700">{t['metal']} / {t['kilates']}:</p>
-                    """
-        
-        for comb in data['COMBINACIONES']:
-            valor_seleccion = comb['VALOR']
-            
-            # Chequear si esta combinación específica (Modelo + Metal + Kilate) está seleccionada
-            is_dama_selected = (valor_seleccion == f"{modelo_dama_actual};{metal_dama_actual};{kilates_dama_actual}")
-            is_cab_selected = (valor_seleccion == f"{modelo_cab_actual};{metal_cab_actual};{kilates_cab_actual}")
-            
-            # Bloque de selección para una combinación específica
-            html_catalogo += f"""
-                            <div class="bg-gray-50 p-3 rounded-lg border">
-                                <p class="text-sm font-medium text-gray-800 mb-2">{comb['METAL']} {comb['CARAT']}K</p>
-                                
-                                <label class="flex items-center space-x-2 p-1.5 bg-pink-100 rounded cursor-pointer hover:bg-pink-200 {'border border-pink-500' if is_dama_selected else ''}">
-                                    <input type="radio" name="seleccion_dama" value="{valor_seleccion}" 
-                                            {'checked' if is_dama_selected else ''}
-                                            class="form-radio text-pink-500 h-4 w-4">
-                                    <span class="text-sm font-medium text-pink-700">{t['dama']}</span>
-                                </label>
-                                
-                                <label class="flex items-center space-x-2 p-1.5 bg-blue-100 rounded cursor-pointer hover:bg-blue-200 mt-1 {'border border-blue-500' if is_cab_selected else ''}">
-                                    <input type="radio" name="seleccion_cab" value="{valor_seleccion}" 
-                                            {'checked' if is_cab_selected else ''}
-                                            class="form-radio text-blue-500 h-4 w-4">
-                                    <span class="text-sm font-medium text-blue-700">{t['caballero']}</span>
-                                </label>
-                            </div>
-                            """
-        
-        # Cierre de la tarjeta del modelo
-        html_catalogo += """
+                        <div class="mt-4 space-y-2 w-full">
+                            <!-- Radio Button Dama -->
+                            <label class="flex items-center space-x-2 p-2 bg-pink-100 rounded-lg cursor-pointer hover:bg-pink-200">
+                                <input type="radio" name="seleccion_dama" value="{valor_seleccion}" 
+                                       {'checked' if is_dama_selected else ''}
+                                       class="form-radio text-pink-500 h-4 w-4">
+                                <span class="text-sm font-medium text-pink-700">{t['dama']}</span>
+                            </label>
+                            
+                            <!-- Radio Button Caballero -->
+                            <label class="flex items-center space-x-2 p-2 bg-blue-100 rounded-lg cursor-pointer hover:bg-blue-200">
+                                <input type="radio" name="seleccion_cab" value="{valor_seleccion}" 
+                                       {'checked' if is_cab_selected else ''}
+                                       class="form-radio text-blue-500 h-4 w-4">
+                                <span class="text-sm font-medium text-blue-700">{t['caballero']}</span>
+                            </label>
                         </div>
                     </div>
                     """
@@ -513,6 +424,7 @@ def catalogo():
     html_catalogo += """
                 </div>
                 
+                <!-- Botón final de Volver (por si el usuario está al final de la página) -->
                 <div class="mt-8 text-center">
                     <button type="submit" class="px-8 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-xl hover:bg-indigo-700 transition duration-150">
                         Volver y Aplicar Selección
