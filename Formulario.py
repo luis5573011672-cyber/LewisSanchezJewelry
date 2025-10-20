@@ -66,13 +66,11 @@ def cargar_datos():
         df.columns = df.columns.str.strip()
         df_size.columns = df_size.columns.str.strip()
         
-        # 🚨 CORRECCIÓN CLAVE: CONVERTIR TODOS LOS ENCABEZADOS A MAYÚSCULAS para consistencia
-        # Esto soluciona los errores 'KeyError' por capitalización inconsistente (ej: 'Name' vs 'NAME')
+        # CORRECCIÓN CLAVE: CONVERTIR TODOS LOS ENCABEZADOS A MAYÚSCULAS para consistencia
         df.columns = df.columns.str.upper()
         df_size.columns = df_size.columns.str.upper()
         
-        # Limpieza de valores clave (¡Ahora buscamos solo en MAYÚSCULAS!)
-        # Si tu columna de foto se llama "Ruta Foto", ahora se busca como "RUTA FOTO"
+        # Limpieza de valores clave (Ahora buscamos solo en MAYÚSCULAS)
         for col in ["NAME", "METAL", "RUTA FOTO"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -137,7 +135,8 @@ def formulario():
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
     # --- 2. Obtener Selecciones de Anillo (Modelo, Metal, Kilates, Ancho, Talla) ---
-    # NOTA: Los modelos y metales en sesión ya están en MAYÚSCULAS
+    # CORRECCIÓN: Leer el valor, luego forzar a mayúsculas para consistencia con los DataFrames.
+    # El valor por defecto t['seleccionar'] no debe ser convertido si está siendo usado para la comparación de "no seleccionado".
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
     
@@ -170,27 +169,27 @@ def formulario():
 
     # --- Opciones disponibles (se basan en los modelos seleccionados) ---
     def get_options(modelo):
-        # Buscamos en mayúsculas
-        if modelo == t['seleccionar'].upper():
+        # CORRECCIÓN: Si el DataFrame está vacío o es el valor por defecto (en mayúsculas), retornar vacío
+        if df_size.empty or modelo == t['seleccionar'].upper():
             return [], []
+            
         filtro_size = (df_size["NAME"] == modelo)
-        # Las columnas ANCHO y SIZE ya están en mayúsculas.
         anchos = sorted(df_size.loc[filtro_size, "ANCHO"].astype(str).str.strip().unique().tolist())
         # Ordena las tallas numéricamente
         tallas = sorted(df_size.loc[filtro_size, "SIZE"].astype(str).str.strip().unique().tolist(), 
                               key=lambda x: (re.sub(r'\D', '', x), x)) 
         return anchos, tallas
 
+    # Esto llama a get_options, y si df_size está vacío, retorna [].
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
     # --- Función de Búsqueda de Peso y Costo ---
     def obtener_peso_y_costo(modelo, metal, ancho, talla):
-        if not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar'].upper():
+        if df.empty or df_size.empty or not all([modelo, metal, ancho, talla]) or modelo == t['seleccionar'].upper():
             return 0, 0
             
         # 1. Buscar el PESO en df_size (por Modelo, Ancho, y Talla)
-        # Buscamos con los nombres de columna en MAYÚSCULAS
         filtro_peso = (df_size["NAME"] == modelo) & \
                       (df_size["ANCHO"] == ancho) & \
                       (df_size["SIZE"] == talla)
@@ -203,14 +202,13 @@ def formulario():
             except: peso = 0
 
         # 2. Buscar el COSTO FIJO en df (solo por Modelo y Metal)
-        # Buscamos con los nombres de columna en MAYÚSCULAS
         filtro_costo = (df["NAME"] == modelo) & \
                        (df["METAL"] == metal)
         
         price_cost = 0
         if not df.loc[filtro_costo].empty:
             costo_fila = df.loc[filtro_costo].iloc[0]
-            price_cost = costo_fila.get("PRICE COST", 0) # Asumiendo que esta columna sigue el patrón
+            price_cost = costo_fila.get("PRICE COST", 0)
             try: price_cost = float(price_cost)
             except: price_cost = 0
 
@@ -376,8 +374,8 @@ def catalogo():
             try:
                 modelo, metal = seleccion.split(";")
                 # Guardamos los valores en MAYÚSCULAS en la sesión
-                session[f"modelo_{tipo}"] = modelo.upper()
-                session[f"metal_{tipo}"] = metal.upper()
+                session[f"modelo_{tipo}"] = modelo.strip().upper()
+                session[f"metal_{tipo}"] = metal.strip().upper()
                 
                 return redirect(url_for("formulario"))
             except ValueError:
@@ -396,8 +394,21 @@ def catalogo():
         "caballero": "Caballero" if es else "Gentleman",
         "metal": "Metal" if es else "Metal",
     }
+    
+    # Comprobar si df está vacío antes de intentar acceder a las columnas
+    if df.empty:
+         html_catalogo = f"""
+        <!DOCTYPE html>
+        <html><body><div style="text-align: center; padding: 50px;">
+        <h1 style="color: red;">Error de Carga de Datos</h1>
+        <p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p>
+        <p>Asegúrese de que '{EXCEL_PATH}' existe y tiene datos.</p>
+        <a href="{url_for('formulario')}">Volver</a>
+        </div></body></html>
+        """
+         return render_template_string(html_catalogo)
 
-    # 🚨 CORRECCIÓN: Usamos solo MAYÚSCULAS ('RUTA FOTO') para consistencia
+    # Usamos solo MAYÚSCULAS ('RUTA FOTO') para consistencia
     df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
     df_catalogo["NOMBRE_FOTO"] = df_catalogo["RUTA FOTO"].apply(obtener_nombre_archivo_imagen)
 
