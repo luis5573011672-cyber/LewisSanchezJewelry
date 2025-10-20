@@ -59,47 +59,54 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
 def cargar_datos():
     """
     Carga los DataFrames. df para catálogo/peso (WEDDING BANDS), 
-    df_adicional para costos extra (SIZE).
+    df_adicional para costos extra (SIZE). 
+    Incluye corrección de nombres de columna de inglés a español (WIDTH -> ANCHO).
     """
     try:
         # 1. Cargar la hoja WEDDING BANDS (Encabezados en la Fila 2 -> índice 1)
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
         
-        # Leemos los encabezados de la fila de índice 1 (Fila 2), limpiamos y forzamos a MAYÚSCULAS
+        # Leemos los encabezados, limpiamos y forzamos a MAYÚSCULAS
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         
         # Asignar encabezados y empezar el DataFrame desde la Fila 3 (índice 2)
         df = df_raw.iloc[2:].copy()
         df.columns = new_columns_df
         
+        # 🚨 CORRECCIÓN FINAL: Renombrar 'WIDTH' a 'ANCHO'
+        if 'WIDTH' in df.columns:
+            df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
+            
         # 2. Cargar la hoja SIZE (Encabezados en la Fila 1 -> índice 0) para Costos Adicionales
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         new_columns_adicional = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = new_columns_adicional
 
-        # Renombrar 'SIZE' a 'TALLA_ADICIONAL' en la hoja de costos extra para evitar conflictos
+        # Renombrar 'SIZE' a 'TALLA_ADICIONAL' en la hoja de costos extra para evitar conflictos 
         if 'SIZE' in df_adicional.columns:
             df_adicional.rename(columns={'SIZE': 'TALLA_ADICIONAL'}, inplace=True) 
 
         # 3. Limpieza de valores clave
-        # Limpieza en DF principal
+        # Limpieza en DF principal (df, que contiene NAME, ANCHO, SIZE, PESO)
         for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "SIZE", "PESO", "PESO_AJUSTADO"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
             
-        # Limpieza en DF adicional (Solo TALLA_ADICIONAL y ADICIONAL)
+        # Limpieza en DF adicional (TALLA_ADICIONAL y ADICIONAL)
         for col in ["TALLA_ADICIONAL", "ADICIONAL"]: 
             if col in df_adicional.columns:
                 df_adicional[col] = df_adicional[col].astype(str).str.strip()
                 
-        logging.warning(f"Columnas df (WEDDING BANDS): {df.columns.tolist()}")
+        logging.warning(f"Columnas df (WEDDING BANDS) con ANCHO: {df.columns.tolist()}")
         logging.warning(f"Columnas df_adicional (SIZE): {df_adicional.columns.tolist()}")
 
+        # df_size se usa en get_options y obtener_peso_y_costo, y ahora debe ser df (WEDDING BANDS)
+        df_size = df.copy() 
+        
         return df, df_adicional
     except Exception as e:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
-        # Devolvemos DataFrames vacíos para que la aplicación no se caiga
         return pd.DataFrame(), pd.DataFrame()
     
 
@@ -123,7 +130,8 @@ def obtener_nombre_archivo_imagen(ruta_completa):
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    # 🚨 CAMBIO CLAVE: Cargar df_adicional en lugar de df_size
+    # df contiene los datos de WEDDING BANDS (modelo, ancho, talla, peso, costo fijo)
+    # df_adicional contiene los datos de SIZE (talla y costo adicional)
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
 
@@ -184,13 +192,13 @@ def formulario():
 
     # --- Opciones disponibles (se basan en los modelos seleccionados, USANDO SOLO df) ---
     def get_options(modelo):
-        # 🚨 CAMBIO CLAVE: Usamos solo df (WEDDING BANDS) para obtener las opciones
+        # Usamos solo df (WEDDING BANDS) que ahora tiene NAME, ANCHO y SIZE
         if df.empty or modelo == t['seleccionar'].upper():
             return [], []
             
-        # NAME, ANCHO, SIZE deben estar en df (WEDDING BANDS)
         filtro = (df["NAME"] == modelo)
         
+        # ANCHO y SIZE ya están renombrados o limpios
         anchos = sorted(df.loc[filtro, "ANCHO"].astype(str).str.strip().unique().tolist())
         tallas = sorted(df.loc[filtro, "SIZE"].astype(str).str.strip().unique().tolist(), 
                               key=lambda x: (re.sub(r'\D', '', x), x)) 
@@ -226,7 +234,7 @@ def formulario():
         # 2. Buscar el COSTO ADICIONAL en df_adicional_local (Hoja SIZE)
         cost_adicional = 0
         if not df_adicional_local.empty:
-            # Buscar por la talla seleccionada (columna renombrada a TALLA_ADICIONAL)
+            # Buscar por la talla seleccionada (columna TALLA_ADICIONAL)
             filtro_adicional = (df_adicional_local["TALLA_ADICIONAL"] == talla) 
             
             if not df_adicional_local.loc[filtro_adicional].empty:
@@ -242,7 +250,6 @@ def formulario():
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
-        # Monto Dama: Oro + Costo Fijo + Costo Adicional
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama 
         monto_total += monto_dama
 
@@ -251,7 +258,6 @@ def formulario():
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
-        # Monto Caballero: Oro + Costo Fijo + Costo Adicional
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
         monto_total += monto_cab
     # --------------------- Generación del HTML para el Formulario ---------------------
