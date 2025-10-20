@@ -58,25 +58,6 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
     monto_total = valor_gramo * peso_gramos
     return valor_gramo, monto_total
 
-def calcular_monto_aproximado(monto_bruto):
-    """
-    Aproxima (redondea hacia arriba) el monto al múltiplo de 10 más cercano.
-    Ej: 1315.21 -> 1320.00
-    """
-    if monto_bruto <= 0:
-        return 0.0
-    
-    # Redondea hacia arriba al entero más cercano divisible por 10
-    aproximado = math.ceil(monto_bruto / 10.0) * 10.0
-    
-    # Si la aproximación es igual al monto_bruto, lo dejamos como está o al siguiente múltiplo de 10
-    # Pero siguiendo el requerimiento (1315.21 -> 1320), la fórmula de ceil funciona bien.
-    
-    # Ejemplo: 1310.00 / 10 = 131.0 -> ceil(131) = 131 -> 1310.00 (Perfecto)
-    # Ejemplo: 1310.01 / 10 = 131.001 -> ceil(131.001) = 132 -> 1320.00 (Perfecto)
-    
-    return aproximado
-
 def cargar_datos():
     """
     Carga los DataFrames con las correcciones de nombres de columna.
@@ -105,11 +86,7 @@ def cargar_datos():
         # 3. Limpieza de valores clave
         for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO"]: 
             if col in df.columns:
-                # CORRECCIÓN: Limpiar 'mm' del ANCHO en el DataFrame para evitar la doble impresión en el selector
-                if col == "ANCHO":
-                     df[col] = df[col].astype(str).str.strip().str.replace('MM', '', regex=False).str.strip()
-                else:
-                    df[col] = df[col].astype(str).str.strip()
+                df[col] = df[col].astype(str).str.strip()
             
         for col in ["SIZE", "ADICIONAL"]: 
             if col in df_adicional.columns:
@@ -183,7 +160,7 @@ def formulario():
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
 
-    monto_total_bruto = 0.0
+    monto_total = 0.0
 
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     session["idioma"] = idioma
@@ -280,20 +257,8 @@ def formulario():
         
         filtro_ancho = (df["NAME"] == modelo)
         anchos = sorted(df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist()) if "ANCHO" in df.columns else []
-        
-        # CORRECCIÓN: Ordenamiento numérico de las tallas (Size)
-        tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
-        
-        def sort_size_key(size_str):
-            try:
-                # Intenta convertir a flotante (maneja 10, 10.5, 3, 3.25, etc.)
-                return float(size_str)
-            except ValueError:
-                # Si no es un número limpio, lo ordena al final o por su valor alfabético
-                return float('inf') # Pone los valores no numéricos al final
-                
-        tallas = sorted(tallas_raw, key=sort_size_key)
-        
+        tallas = sorted(df_adicional["SIZE"].astype(str).str.strip().unique().tolist(), 
+                          key=lambda x: (re.sub(r'\D', '', x), x)) if "SIZE" in df_adicional.columns else []
         return anchos, tallas
 
     anchos_d, tallas_d = get_options(modelo_dama)
@@ -318,7 +283,7 @@ def formulario():
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama 
-        monto_total_bruto += monto_dama
+        monto_total += monto_dama
 
     # --- Cálculo caballero ---
     peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
@@ -326,11 +291,7 @@ def formulario():
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
-        monto_total_bruto += monto_cab
-        
-    # CORRECCIÓN: Calcular monto total aproximado
-    monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
-    
+        monto_total += monto_cab
     # --------------------- Generación del HTML para el Formulario ---------------------
     
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
@@ -360,7 +321,7 @@ def formulario():
             <div class="w-full md:w-1/3">
                 <label for="ancho_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['ancho']}</label>
                 <select id="ancho_{tipo}" name="ancho_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
-                    {''.join([f'<option value="{a}" {"selected" if a == ancho_actual else ""}>{a}</option>' for a in anchos])}
+                    {''.join([f'<option value="{a}" {"selected" if a == ancho_actual else ""}>{a} mm</option>' for a in anchos])}
                 </select>
             </div>
             <div class="w-full md:w-1/3">
@@ -422,7 +383,7 @@ def formulario():
                     </p>
                     {selectores_dama}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD (Peso: ' + f'{peso_dama:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_dama:,.2f}' + ')' if monto_dama > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado: $' + f'{monto_dama:,.2f}' + ' USD (Peso: ' + f'{peso_dama:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_dama:,.2f}' + ')' if monto_dama > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -434,7 +395,7 @@ def formulario():
                     </p>
                     {selectores_cab}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_cab:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_cab:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -444,8 +405,7 @@ def formulario():
 
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
-                    <p class="text-4xl font-extrabold text-indigo-600">${monto_total_aprox:,.2f} USD</p>
-                    <p class="text-sm text-gray-500 mt-1">Monto bruto sin redondear: ${monto_total_bruto:,.2f} USD</p>
+                    <p class="text-4xl font-extrabold text-indigo-600">${monto_total:,.2f} USD</p>
                 </div>
                 
                 <div class="pt-6">
@@ -515,7 +475,7 @@ def catalogo():
         "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
         "volver": "Volver al Formulario" if es else "Back to Form",
         "dama": "Dama" if es else "Lady",
-        "caballero": "Caballero" if es else "Gentleman",
+        "caballero": "Caballero" if es else "Gentleman", # CORREGIDO: Sin comillas dobles extra
         "metal": "Metal" if es else "Metal",
     }
     

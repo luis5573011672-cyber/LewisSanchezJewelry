@@ -3,3 +3,14 @@ git init	Inicializa un nuevo repositorio Git local en esta carpeta.
 git add .	Añade TODOS los archivos de la carpeta actual al staging area (listos para el commit).
 git commit -m "Primer commit del proyecto limpio"	Crea el primer commit (el registro de la versión) de tu código local.
 git branch -M main	Nombra a tu rama principal como main (estándar moderno).
+
+PASOS PARA ACTUALIZAR CAMBIOS EN GIBHUB Y RENDER
+
+cd "C:\Users\sluis\Documents\Lewis\Formulario WEB"
+
+git add .
+git commit -m "Correcion Catalogo 3 "
+
+SUBIR LOS CAMBIOS A GITHUB
+git push origin main 
+# (Usa 'master' en lugar de 'main' si esa es tu rama principal)
