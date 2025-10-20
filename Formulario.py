@@ -28,6 +28,7 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
+    # Usar variable de entorno para API Key en un entorno real
     API_KEY = "goldapi-4g9e8p719mgvhodho-io"
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -114,11 +115,10 @@ def obtener_nombre_archivo_imagen(ruta_completa):
     nombre_archivo = os.path.basename(ruta_limpia).strip()
     return nombre_archivo.replace('%20', ' ')
 
-# 🚨 AJUSTE: La función ahora acepta 'select_text' como argumento.
 def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero, select_text):
     """Busca peso y costos fijo/adicional."""
     
-    # 🚨 CORRECCIÓN NameError: Usa 'select_text' en lugar de t['seleccionar'].upper()
+    # CORRECCIÓN NameError: Usa 'select_text' en lugar de t['seleccionar'].upper()
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0, 0, 0 
         
@@ -184,9 +184,7 @@ def formulario():
         "email": "Email de Contacto" if es else "Contact Email"
     }
     
-    # 🚨 Inicialización de Modelos/Metales: Usar "t['seleccionar']" solo si no hay nada en sesión O es la carga inicial (GET sin POST)
-    
-    # Si es el primer GET a la página, borramos las selecciones de modelos para que no queden "pegados"
+    # Inicialización de Modelos/Metales: Usar "t['seleccionar']" solo si no hay nada en sesión O es la carga inicial (GET sin POST)
     if request.method == "GET" and "modelo_dama" not in session and "modelo_cab" not in session:
         modelo_dama = t['seleccionar'].upper()
         metal_dama = ""
@@ -211,9 +209,11 @@ def formulario():
     talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
 
     if request.method == "POST":
+        # Guardar datos del cliente
         session["nombre_cliente"] = nombre_cliente
         session["email_cliente"] = email_cliente
         
+        # Guardar selecciones de anillo
         session["kilates_dama"] = kilates_dama
         session["ancho_dama"] = ancho_dama
         session["talla_dama"] = talla_dama
@@ -252,7 +252,6 @@ def formulario():
             talla_cab = tallas_c[0]
 
     # --- Cálculo dama ---
-    # 🚨 CORRECCIÓN NameError: Se pasa el texto de selección como último argumento
     peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
@@ -261,7 +260,6 @@ def formulario():
         monto_total += monto_dama
 
     # --- Cálculo caballero ---
-    # 🚨 CORRECCIÓN NameError: Se pasa el texto de selección como último argumento
     peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
@@ -273,10 +271,11 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
+        # 🚨 CAMBIO AQUÍ: Añadir onchange="this.form.submit()" para recálculo automático
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
-                <select id="kilates_{tipo}" name="kilates_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg">
+                <select id="kilates_{tipo}" name="kilates_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
                     {''.join([f'<option value="{k}" {"selected" if k == kilates_actual else ""}>{k}K</option>' for k in kilates_opciones])}
                 </select>
             </div>
@@ -289,18 +288,19 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
+        # 🚨 CAMBIO AQUÍ: Añadir onchange="this.form.submit()" para recálculo automático
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
             <div class="w-full md:w-1/3">
                 <label for="ancho_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['ancho']}</label>
-                <select id="ancho_{tipo}" name="ancho_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg">
+                <select id="ancho_{tipo}" name="ancho_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
                     {''.join([f'<option value="{a}" {"selected" if a == ancho_actual else ""}>{a} mm</option>' for a in anchos])}
                 </select>
             </div>
             <div class="w-full md:w-1/3">
                 <label for="talla_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['talla']}</label>
-                <select id="talla_{tipo}" name="talla_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg">
+                <select id="talla_{tipo}" name="talla_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
                     {''.join([f'<option value="{s}" {"selected" if s == talla_actual else ""}>{s}</option>' for s in tallas])}
                 </select>
             </div>
