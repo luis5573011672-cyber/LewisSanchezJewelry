@@ -57,20 +57,33 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
     return valor_gramo, monto_total
 
 def cargar_datos():
-    """Carga los DataFrames desde el archivo Excel y normaliza los encabezados."""
+    """Carga los DataFrames desde el archivo Excel y FUERZA la asignación de encabezados."""
     try:
-        df = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=1) 
-        df_size = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl")
+        # Cargar sin encabezado para inspeccionar las filas
+        df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
+        df_size_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         
-        # Limpieza de espacios en encabezados
-        df.columns = df.columns.str.strip()
-        df_size.columns = df_size.columns.str.strip()
+        # --- PROCESAR df (WEDDING BANDS) ---
+        # Fila 1 (índice 1) contiene los encabezados.
+        new_columns = df_raw.iloc[1].astype(str).str.strip().str.upper()
         
-        # CORRECCIÓN CLAVE: CONVERTIR TODOS LOS ENCABEZADOS A MAYÚSCULAS para consistencia
-        df.columns = df.columns.str.upper()
-        df_size.columns = df_size.columns.str.upper()
+        # Si la columna 'NAME' es el problema, su valor aquí será el que Pandas está leyendo.
+        # Imprimir para depurar:
+        # logging.info(f"Encabezados leídos para DF: {new_columns.tolist()}") 
         
-        # Limpieza de valores clave (Ahora buscamos solo en MAYÚSCULAS)
+        # Asignar los nuevos encabezados y eliminar la fila de encabezados duplicada
+        df = df_raw.iloc[2:].copy()
+        df.columns = new_columns
+        
+        # --- PROCESAR df_size (SIZE) ---
+        # Fila 0 (índice 0) contiene los encabezados.
+        new_columns_size = df_size_raw.iloc[0].astype(str).str.strip().str.upper()
+        
+        # Asignar los nuevos encabezados y eliminar la fila de encabezados duplicada
+        df_size = df_size_raw.iloc[1:].copy()
+        df_size.columns = new_columns_size
+
+        # Limpieza de valores clave (Usamos los nombres de columna en MAYÚSCULAS)
         for col in ["NAME", "METAL", "RUTA FOTO"]: 
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -81,9 +94,9 @@ def cargar_datos():
             
         return df, df_size
     except Exception as e:
-        logging.error(f"Error al leer el archivo Excel: {e}")
+        # Esto imprimirá el error completo, ayudando a ver si falla al cargar la hoja.
+        logging.error(f"Error CRÍTICO al leer el archivo Excel y asignar encabezados: {e}") 
         return pd.DataFrame(), pd.DataFrame()
-    
 
 def obtener_nombre_archivo_imagen(ruta_completa):
     """Extrae solo el nombre del archivo del path y maneja barras invertidas de Windows."""
