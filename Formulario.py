@@ -193,7 +193,7 @@ def formulario():
     es = idioma == "Español"
 
     t = {
-        # CAMBIO AQUÍ: Título en inglés solo "ESTIMATE"
+        # Título en inglés solo "ESTIMATE"
         "titulo": "PRESUPUESTO" if es else "ESTIMATE",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
@@ -212,16 +212,23 @@ def formulario():
     
     fresh_selection = request.args.get("fresh_selection")
     
-    # --- 1. Obtener/Establecer Datos del Cliente (Persisten) ---
-    # Nota: Si el POST es solo por el cambio de idioma, los campos deben venir del request.form si se llenaron antes.
-    # Si no, se obtienen de la sesión.
+    # --- 1. Obtener/Establecer Datos del Cliente y Anillos ---
 
-    # Obtener valores POST o de Sesión para Cliente y Anillos
+    # Cliente (CORRECCIÓN: Ya no se obtiene de la sesión, solo de la forma si fue enviada)
+    if request.method == "POST":
+        # POST normal (submit del formulario o cambio de idioma)
+        # Si es POST, usamos lo que vino en el formulario para rellenar
+        nombre_cliente = request.form.get("nombre_cliente", "")
+        email_cliente = request.form.get("email_cliente", "")
+    else:
+        # GET (Visita inicial o redirección)
+        # Lo inicializamos en vacío para que no haya persistencia
+        nombre_cliente = ""
+        email_cliente = ""
+
+    # Anillos (Estos SÍ persisten en sesión)
     if request.method == "POST" and "idioma" not in request.form:
         # POST normal (submit del formulario)
-        nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
-        email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
-        
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
         talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
@@ -232,9 +239,6 @@ def formulario():
 
     else:
         # GET, GET con fresh_selection, o POST por cambio de idioma (que redirige aquí como GET)
-        nombre_cliente = session.get("nombre_cliente", "")
-        email_cliente = session.get("email_cliente", "")
-        
         kilates_dama = session.get("kilates_dama", "14")
         ancho_dama = session.get("ancho_dama", "")
         talla_dama = session.get("talla_dama", "")
@@ -272,9 +276,8 @@ def formulario():
                 talla_cab = ""
 
     
-    # Guardar TODAS las selecciones de anillo y cliente en sesión para persistencia
-    session["nombre_cliente"] = nombre_cliente
-    session["email_cliente"] = email_cliente
+    # Guardar SOLO las selecciones de anillo en sesión para persistencia
+    # (Los campos de cliente ya NO se guardan para que se limpien al inicio)
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -427,11 +430,9 @@ def formulario():
                 display: flex;
                 align-items: center;
                 flex-grow: 1; /* Ocupa todo el espacio central disponible */
-                /* position: relative;  Eliminamos esto si el logo no usa absolute*/
             }}
             .logo-img {{ 
                 height: 60px; /* Logo más grande */
-                /* Eliminamos position: absolute; left: 0; para que sea un elemento flex normal */
                 margin-right: 15px; /* Espacio entre el logo y el título */
             }}
             @media (max-width: 640px) {{
@@ -646,7 +647,7 @@ def catalogo():
                 .logo-img {{ height: 40px; }}
             }}
             h1 {{ 
-                flex-grow: 1; /* Permite que el h1 ocupe el espacio restante */
+                flex-grow: 1; /* Ocupa el espacio central */
                 text-align: center; /* CENTRA EL TEXTO dentro del h1 */
                 margin: 0; /* Elimina márgenes por defecto del h1 */
             }} 
@@ -658,7 +659,8 @@ def catalogo():
             <div class="title-container">
                 <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                 <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
-                <div style="width: 60px; margin-left: 15px;"></div> 
+                
+<div style="width: 60px; margin-left: 15px;"></div> 
             </div>
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
