@@ -328,6 +328,9 @@ def formulario():
     # Calcular monto total aproximado
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
     
+    # URL de la imagen (asumiendo que está en /static/logo.png)
+    logo_url = url_for('static', filename='logo.png')
+    
     # --------------------- Generación del HTML para el Formulario ---------------------
     
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
@@ -389,11 +392,18 @@ def formulario():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
+            .title-container {{ display: flex; justify-content: center; align-items: center; margin-bottom: 1rem; }}
+            .logo-img {{ height: 40px; margin-right: 10px; }} /* Ajusta el tamaño aquí */
         </style>
     </head>
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
         <div class="w-full max-w-2xl card p-6 md:p-10 mt-6">
-            <h1 class="text-3xl font-extrabold mb-4 text-gray-800 text-center">{t['titulo']}</h1>
+            
+            <div class="title-container">
+                <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                <h1 class="text-3xl font-extrabold text-gray-800 text-center">{t['titulo']}</h1>
+            </div>
+            
             <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
 
             <form method="POST" action="/" class="space-y-4">
@@ -442,7 +452,7 @@ def formulario():
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total_aprox:,.2f} USD</p>
-                    </div>
+                </div>
                 
                 <div class="pt-6">
                     <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
