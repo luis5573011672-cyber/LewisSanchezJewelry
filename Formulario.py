@@ -69,12 +69,6 @@ def calcular_monto_aproximado(monto_bruto):
     # Redondea hacia arriba al entero más cercano divisible por 10
     aproximado = math.ceil(monto_bruto / 10.0) * 10.0
     
-    # Si la aproximación es igual al monto_bruto, lo dejamos como está o al siguiente múltiplo de 10
-    # Pero siguiendo el requerimiento (1315.21 -> 1320), la fórmula de ceil funciona bien.
-    
-    # Ejemplo: 1310.00 / 10 = 131.0 -> ceil(131) = 131 -> 1310.00 (Perfecto)
-    # Ejemplo: 1310.01 / 10 = 131.001 -> ceil(131.001) = 132 -> 1320.00 (Perfecto)
-    
     return aproximado
 
 def cargar_datos():
@@ -279,21 +273,24 @@ def formulario():
             return [], []
         
         filtro_ancho = (df["NAME"] == modelo)
-        anchos = sorted(df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist()) if "ANCHO" in df.columns else []
         
-        # CORRECCIÓN: Ordenamiento numérico de las tallas (Size)
-        tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
-        
-        def sort_size_key(size_str):
+        # Función auxiliar para ordenar numéricamente
+        def sort_numeric_key(value_str):
             try:
                 # Intenta convertir a flotante (maneja 10, 10.5, 3, 3.25, etc.)
-                return float(size_str)
+                return float(value_str)
             except ValueError:
-                # Si no es un número limpio, lo ordena al final o por su valor alfabético
-                return float('inf') # Pone los valores no numéricos al final
+                # Pone los valores no numéricos al final
+                return float('inf') 
                 
-        tallas = sorted(tallas_raw, key=sort_size_key)
+        # 1. ORDENAMIENTO NUMÉRICO DEL ANCHO
+        anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
+        anchos = sorted(anchos_raw, key=sort_numeric_key)
         
+        # 2. ORDENAMIENTO NUMÉRICO DE LAS TALLAS (SIZE)
+        tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
+        tallas = sorted(tallas_raw, key=sort_numeric_key)
+
         return anchos, tallas
 
     anchos_d, tallas_d = get_options(modelo_dama)
@@ -328,7 +325,7 @@ def formulario():
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
         monto_total_bruto += monto_cab
         
-    # CORRECCIÓN: Calcular monto total aproximado
+    # Calcular monto total aproximado
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
     
     # --------------------- Generación del HTML para el Formulario ---------------------
@@ -445,8 +442,7 @@ def formulario():
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total_aprox:,.2f} USD</p>
-                    <p class="text-sm text-gray-500 mt-1">Monto bruto sin redondear: ${monto_total_bruto:,.2f} USD</p>
-                </div>
+                    </div>
                 
                 <div class="pt-6">
                     <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
