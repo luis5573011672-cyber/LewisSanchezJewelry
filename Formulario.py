@@ -30,7 +30,6 @@ def obtener_precio_oro() -> Tuple[float, str]:
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    # Usar una API Key de prueba o real si se tiene
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -164,19 +163,21 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 
     return peso, price_cost, cost_adicional
 
-def limpiar_sesion_inicial():
-    """Limpia la sesión de todos los datos relevantes al formulario para un inicio limpio."""
+def limpiar_sesion_formulario():
+    """Limpia la sesión de los datos de los ANILLOS para un inicio limpio de presupuesto."""
     keys_to_clear = [
-        "nombre_cliente", "email_cliente", 
         "modelo_dama", "metal_dama", "kilates_dama", "ancho_dama", "talla_dama",
         "modelo_cab", "metal_cab", "kilates_cab", "ancho_cab", "talla_cab",
-        "idioma", "sesion_iniciada"
     ]
     
-    logging.info("Limpieza de sesión para inicio fresco.")
+    logging.info("Limpieza de campos de anillo en la sesión.")
     for key in keys_to_clear:
         if key in session:
-            del session[key]
+            # Reemplazar con valor por defecto si es necesario, o simplemente borrar
+            if "kilates" in key:
+                 session[key] = "14" # Valor por defecto
+            else:
+                del session[key]
 
 # --------------------- RUTAS FLASK ---------------------
 
@@ -184,17 +185,19 @@ def limpiar_sesion_inicial():
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    # 1. Limpieza de sesión en la primera carga (GET sin fresh_selection)
-    if request.method == "GET" and not request.args.get("fresh_selection"):
-        if not session.get("sesion_iniciada"):
-            limpiar_sesion_inicial()
-            session["sesion_iniciada"] = True 
+    # 1. Limpieza Forzada de Campos de Anillo (SOLUCIÓN)
+    is_fresh_start = request.method == "GET" and not request.args.get("fresh_selection")
+    
+    # Solo limpiamos los ANILLOS si es un inicio fresco (no volviendo del catálogo o haciendo POST)
+    if is_fresh_start:
+        limpiar_sesion_formulario()
 
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
     # --- 2. Cargar traducciones e idioma ---
+    # El idioma y datos de cliente no se borran si existe la sesión, lo cual es deseable.
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     
     if request.method == "POST" and "idioma" in request.form:
@@ -230,6 +233,7 @@ def formulario():
     nombre_cliente = session.get("nombre_cliente", "") 
     email_cliente = session.get("email_cliente", "")   
     
+    # Los valores de modelo/metal/ancho/talla serán "" o t['seleccionar'] si se limpiaron
     kilates_dama = session.get("kilates_dama", "14")
     ancho_dama = session.get("ancho_dama", "")
     talla_dama = session.get("talla_dama", "")
@@ -242,11 +246,9 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # ⚠️ CORRECCIÓN CLAVE: RESEATEO DE ANCHO/TALLA AL VOLVER DEL CATÁLOGO (GET fresh_selection=True)
+    # ⚠️ MANEJO DE fresh_selection (Volviendo del catálogo)
     if fresh_selection:
-        # Resetea Ancho/Talla en las variables y en la sesión.
-        # Esto asegura que los selectores estén vacíos y obliga al usuario a seleccionar
-        # o permite que la lógica de autoselección actúe *más tarde* si es necesario.
+        # Esto asegura que los selectores queden vacíos después de seleccionar un NUEVO modelo en el catálogo
         ancho_dama = ""
         talla_dama = ""
         ancho_cab = ""
@@ -277,8 +279,6 @@ def formulario():
         
     
     # 4. Guardar las selecciones de anillo en sesión (asegura que POST actualice todo)
-    # Si fue GET con fresh_selection, aquí se guarda el valor reseteado ("").
-    # Si fue POST, aquí se guarda el valor seleccionado por el usuario.
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -292,8 +292,7 @@ def formulario():
 
 
     # --- 5. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
-    # 💡 Lógica de AUTOCALCULACIÓN/PRE-SELECCIÓN: 
-    # Solo debe rellenar si los campos están vacíos Y se ha seleccionado un modelo.
+    # Esto ocurre si venimos del catálogo o si cambiamos Kilates/etc. con los campos vacíos.
 
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
@@ -320,9 +319,7 @@ def formulario():
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
-    # El reseteo de 'fresh_selection' aseguró que ancho_dama y talla_dama sean "".
-    # Al estar vacíos, esta lógica se ejecuta y selecciona el primer valor del nuevo modelo.
-    # ¡Esta es la lógica deseada! Si el usuario no selecciona, se usa el primer valor.
+    # Forzar la selección del primer ancho y talla si el modelo está seleccionado y NO HAY VALOR ACTUAL.
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
@@ -380,7 +377,6 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # ⚠️ Aquí es donde se usa el valor final de ancho_actual/talla_actual (reseteado o preseleccionado)
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -576,6 +572,7 @@ def catalogo():
     }
     
     # Obtener selecciones actuales para mostrarlas en el catálogo
+    # Estos valores ya deben estar limpios si se cargó la raíz en GET antes.
     modelo_dama_actual = session.get("modelo_dama", "")
     metal_dama_actual = session.get("metal_dama", "")
     modelo_cab_actual = session.get("modelo_cab", "")
