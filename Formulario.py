@@ -163,49 +163,21 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 
     return peso, price_cost, cost_adicional
 
-def limpiar_sesion_formulario():
-    """Limpia la sesión de los datos de los ANILLOS para un inicio limpio de presupuesto."""
-    keys_to_clear = [
-        "modelo_dama", "metal_dama", "kilates_dama", "ancho_dama", "talla_dama",
-        "modelo_cab", "metal_cab", "kilates_cab", "ancho_cab", "talla_cab",
-    ]
-    
-    logging.info("Limpieza de campos de anillo en la sesión.")
-    for key in keys_to_clear:
-        if key in session:
-            # Reemplazar con valor por defecto si es necesario, o simplemente borrar
-            if "kilates" in key:
-                 session[key] = "14" # Valor por defecto
-            else:
-                del session[key]
-
 # --------------------- RUTAS FLASK ---------------------
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    # 1. Limpieza Forzada de Campos de Anillo (SOLUCIÓN)
-    is_fresh_start = request.method == "GET" and not request.args.get("fresh_selection")
-    
-    # Solo limpiamos los ANILLOS si es un inicio fresco (no volviendo del catálogo o haciendo POST)
-    if is_fresh_start:
-        limpiar_sesion_formulario()
-
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # --- 2. Cargar traducciones e idioma ---
-    # El idioma y datos de cliente no se borran si existe la sesión, lo cual es deseable.
-    idioma = request.form.get("idioma", session.get("idioma", "Español"))
+    # --- 1. Cargar traducciones, idioma y datos del cliente (PRIMERO) ---
     
-    if request.method == "POST" and "idioma" in request.form:
-         session["idioma"] = idioma
-         return redirect(url_for("formulario"))
-    else:
-        session["idioma"] = idioma
-
+    # Cargar idioma de la sesión o valor por defecto
+    idioma = request.form.get("idioma", session.get("idioma", "Español"))
+    session["idioma"] = idioma # Asegura que el idioma se guarda inmediatamente
     es = idioma == "Español"
 
     t = {
@@ -224,16 +196,34 @@ def formulario():
         "email": "Email de Contacto" if es else "Contact Email",
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
+
+    # ⚠️ MANEJO DE INICIO FRESCO O RESETEO COMPLETO
+    # Si la ruta es la raíz (GET) y no tenemos datos de anillo, forzamos la limpieza de los datos del cliente, si es necesario.
+    is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
+    if is_root_get and session.get("modelo_dama") is None and session.get("modelo_cab") is None:
+        # Esto solo ocurre en el primer inicio de la sesión o si se borró la cookie.
+        # En flujos normales, los datos del cliente se mantendrán.
+        logging.info("Inicio fresco: Limpiando datos de cliente y anillo.")
+        session["nombre_cliente"] = ""
+        session["email_cliente"] = ""
+        session["modelo_dama"] = t['seleccionar'].upper()
+        session["metal_dama"] = ""
+        session["modelo_cab"] = t['seleccionar'].upper()
+        session["metal_cab"] = ""
+        
+        # Resetear Kilates a valor por defecto
+        session["kilates_dama"] = "14"
+        session["kilates_cab"] = "14"
+        session["ancho_dama"] = ""
+        session["talla_dama"] = ""
+        session["ancho_cab"] = ""
+        session["talla_cab"] = ""
     
-    fresh_selection = request.args.get("fresh_selection")
-    
-    # --- 3. Obtener/Establecer Datos del Cliente y Anillos ---
-    
-    # 3.1. Obtener valores iniciales/actuales de la sesión (BASE)
+    # Cargar datos del cliente
     nombre_cliente = session.get("nombre_cliente", "") 
-    email_cliente = session.get("email_cliente", "")   
-    
-    # Los valores de modelo/metal/ancho/talla serán "" o t['seleccionar'] si se limpiaron
+    email_cliente = session.get("email_cliente", "") 
+
+    # Cargar datos del anillo
     kilates_dama = session.get("kilates_dama", "14")
     ancho_dama = session.get("ancho_dama", "")
     talla_dama = session.get("talla_dama", "")
@@ -246,29 +236,22 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # ⚠️ MANEJO DE fresh_selection (Volviendo del catálogo)
-    if fresh_selection:
-        # Esto asegura que los selectores queden vacíos después de seleccionar un NUEVO modelo en el catálogo
-        ancho_dama = ""
-        talla_dama = ""
-        ancho_cab = ""
-        talla_cab = ""
-        
-        session["ancho_dama"] = ancho_dama
-        session["talla_dama"] = talla_dama
-        session["ancho_cab"] = ancho_cab
-        session["talla_cab"] = talla_cab
-
-    
+    # --- 2. Manejo de POST (Incluyendo cambio de Kilates) ---
     if request.method == "POST":
-        # POST: TOMA del formulario (incluyendo cliente y los selects de anillo)
-        nombre_cliente = request.form.get("nombre_cliente", "")
-        email_cliente = request.form.get("email_cliente", "")
         
+        # 2.1. Guardar siempre los datos del cliente que vinieron en el POST
+        # Esto asegura que si solo se cambia Kilates, el cliente no se pierda
+        nombre_cliente = request.form.get("nombre_cliente", nombre_cliente)
+        email_cliente = request.form.get("email_cliente", email_cliente)
         session["nombre_cliente"] = nombre_cliente 
-        session["email_cliente"] = email_cliente   
+        session["email_cliente"] = email_cliente 
         
-        # Anillos: TOMA de la forma 
+        # 2.2. Manejo del cambio de idioma (redirección)
+        if "idioma" in request.form:
+             # El idioma ya se guardó al principio, solo redirigimos para que se apliquen las traducciones
+             return redirect(url_for("formulario"))
+        
+        # 2.3. Guardar las selecciones de anillo que vinieron en el POST
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
@@ -278,7 +261,17 @@ def formulario():
         talla_cab = request.form.get("talla_cab", talla_cab)
         
     
-    # 4. Guardar las selecciones de anillo en sesión (asegura que POST actualice todo)
+    # --- 3. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
+    fresh_selection = request.args.get("fresh_selection")
+    if fresh_selection:
+        # ⚠️ CORRECCIÓN CLAVE: Solo se resetea Ancho/Talla del anillo para forzar la pre-selección
+        # El resto de datos (cliente, modelo, metal) ya están en la sesión y no se tocan.
+        ancho_dama = ""
+        talla_dama = ""
+        ancho_cab = ""
+        talla_cab = ""
+
+    # 4. Guardar los valores de anillo actuales/actualizados en sesión
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -292,8 +285,6 @@ def formulario():
 
 
     # --- 5. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
-    # Esto ocurre si venimos del catálogo o si cambiamos Kilates/etc. con los campos vacíos.
-
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
             return [], []
@@ -306,11 +297,9 @@ def formulario():
             except ValueError:
                 return float('inf') 
                 
-        # 1. ORDENAMIENTO NUMÉRICO DEL ANCHO
         anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric_key)
         
-        # 2. ORDENAMIENTO NUMÉRICO DE LAS TALLAS (SIZE)
         tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
         tallas = sorted(tallas_raw, key=sort_numeric_key)
 
@@ -319,7 +308,7 @@ def formulario():
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
-    # Forzar la selección del primer ancho y talla si el modelo está seleccionado y NO HAY VALOR ACTUAL.
+    # Autoselección si el campo está vacío (ej. después de fresh_selection o cambio de modelo)
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
@@ -572,7 +561,6 @@ def catalogo():
     }
     
     # Obtener selecciones actuales para mostrarlas en el catálogo
-    # Estos valores ya deben estar limpios si se cargó la raíz en GET antes.
     modelo_dama_actual = session.get("modelo_dama", "")
     metal_dama_actual = session.get("metal_dama", "")
     modelo_cab_actual = session.get("modelo_cab", "")
