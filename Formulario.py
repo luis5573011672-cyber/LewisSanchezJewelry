@@ -193,8 +193,8 @@ def formulario():
     es = idioma == "Español"
 
     t = {
-        # MODIFICACIÓN 1: Cambiar el título en español a "PRESUPUESTO"
-        "titulo": "PRESUPUESTO" if es else "Estimate or Work Order Form",
+        # CAMBIO AQUÍ: Título en inglés solo "ESTIMATE"
+        "titulo": "PRESUPUESTO" if es else "ESTIMATE",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
         "ancho": "Ancho (mm)" if es else "Width (mm)",
@@ -427,18 +427,22 @@ def formulario():
                 display: flex;
                 align-items: center;
                 flex-grow: 1; 
-                justify-content: center; 
+                /* CAMBIO AQUÍ: Eliminado justify-content: center; */
                 position: relative; 
             }}
             .logo-img {{ 
-                height: 60px; /* Logo más grande */
+                height: 60px; 
                 position: absolute; 
                 left: 0;
             }}
             @media (max-width: 640px) {{
                 .logo-img {{ height: 40px; }}
             }}
-            h1 {{ margin: 0; }} 
+            h1 {{ 
+                margin: 0; 
+                padding-left: 20px; /* Añade un margen a la izquierda para empujar el título */
+                text-align: left; /* Asegura que el texto se alinee a la izquierda dentro de su espacio */
+            }} 
             .language-selector-container {{
                 min-width: 120px; 
                 text-align: right;
@@ -448,7 +452,8 @@ def formulario():
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
         <div class="w-full max-w-2xl card p-6 md:p-10 mt-6">
             
-            <form method="POST" action="/" class="space-y-4"> <div class="header-content">
+            <form method="POST" action="/" class="space-y-4"> 
+                <div class="header-content">
                     <div class="title-group">
                         <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                         <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
@@ -562,7 +567,8 @@ def catalogo():
     es = idioma == "Español"
     
     t = {
-        "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
+        # Título del catálogo se mantiene descriptivo
+        "titulo": "Catálogo de Anillos de Boda" if es else "WEDDING RING CATALOG", 
         "volver": "Volver al Formulario" if es else "Back to Form",
         "dama": "Dama" if es else "Lady",
         "caballero": "Caballero" if es else "Gentleman",
@@ -629,20 +635,24 @@ def catalogo():
             .title-container {{ 
                 display: flex; 
                 align-items: center; 
-                justify-content: center;
+                /* CAMBIO AQUÍ: Eliminado justify-content: center; */
                 margin-bottom: 1rem;
                 position: relative; 
                 width: 100%;
             }}
             .logo-img {{ 
-                height: 60px; /* Logo más grande */
+                height: 60px; 
                 position: absolute; 
                 left: 0; 
             }}
             @media (max-width: 640px) {{
                 .logo-img {{ height: 40px; }}
             }}
-            h1 {{ margin: 0; }} 
+            h1 {{ 
+                margin: 0; 
+                padding-left: 20px; /* Añade un margen a la izquierda para empujar el título */
+                text-align: left; /* Asegura que el texto se alinee a la izquierda dentro de su espacio */
+            }} 
         </style>
     </head>
     <body class="p-4 md:p-8">
@@ -650,7 +660,7 @@ def catalogo():
             
             <div class="title-container">
                 <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
-                <h1 class="text-3xl font-extrabold text-gray-800 text-center">{t['titulo']}</h1>
+                <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
             </div>
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
