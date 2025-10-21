@@ -193,7 +193,7 @@ def formulario():
 
     t = {
         # MODIFICACIÓN 1: Cambiar el título en español a "PRESUPUESTO"
-        "titulo": "PRESUPUESTO" if es else "Estimate or Work Order Form",
+        "titulo": "    PRESUPUESTO" if es else "    ESTIMATE",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
         "ancho": "Ancho (mm)" if es else "Width (mm)",
