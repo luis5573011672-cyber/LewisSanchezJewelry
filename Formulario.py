@@ -11,7 +11,8 @@ logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing")
+# Es CRUCIAL que la clave secreta se establezca para que las sesiones funcionen.
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
 EXCEL_PATH = "Formulario Catalogo.xlsm"
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
@@ -55,7 +56,7 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
         return 0, 0
     
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
-    monto_total = valor_gramo * peso_gramo
+    monto_total = valor_gramo * peso_gramos
     return valor_gramo, monto_total
 
 def calcular_monto_aproximado(monto_bruto):
@@ -168,24 +169,41 @@ def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero
 
     return peso, price_cost, cost_adicional
 
+def limpiar_sesion_inicial():
+    """Limpia la sesión de todos los datos relevantes al formulario para un inicio limpio."""
+    keys_to_clear = [
+        "nombre_cliente", "email_cliente", 
+        "modelo_dama", "metal_dama", "kilates_dama", "ancho_dama", "talla_dama",
+        "modelo_cab", "metal_cab", "kilates_cab", "ancho_cab", "talla_cab"
+    ]
+    
+    logging.info("Limpieza de sesión para inicio fresco.")
+    for key in keys_to_clear:
+        if key in session:
+            del session[key]
+    
 # --------------------- RUTAS FLASK ---------------------
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
+    # 1. Limpieza de sesión en la primera carga (GET sin fresh_selection)
+    if request.method == "GET" and not request.args.get("fresh_selection"):
+        # Usamos una clave de control para saber si ya se limpió la sesión
+        if not session.get("sesion_iniciada"):
+            limpiar_sesion_inicial()
+            session["sesion_iniciada"] = True # Marcamos la sesión como iniciada/limpia
+
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
-
     monto_total_bruto = 0.0
-
-    # 1. Obtener idioma de la forma o sesión
+    
+    # --- 2. Cargar traducciones e idioma ---
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     
-    # Si viene del selector, guardarlo. Si no, usa el de la sesión.
     if request.method == "POST" and "idioma" in request.form:
          session["idioma"] = idioma
-         # Redirigir para que el cambio de idioma surta efecto en todo el formulario
          return redirect(url_for("formulario"))
     else:
         session["idioma"] = idioma
@@ -193,7 +211,6 @@ def formulario():
     es = idioma == "Español"
 
     t = {
-        # Título en inglés solo "ESTIMATE"
         "titulo": "PRESUPUESTO" if es else "ESTIMATE",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
@@ -212,20 +229,17 @@ def formulario():
     
     fresh_selection = request.args.get("fresh_selection")
     
-    # --- 1. Obtener/Establecer Datos del Cliente y Anillos ---
+    # --- 3. Obtener/Establecer Datos del Cliente y Anillos ---
 
-    # CORRECCIÓN: Lógica para Nombre/Email. 
-    # Si es POST, toma los datos de la forma y los guarda en sesión.
-    # Si es GET (incluyendo el regreso del catálogo), usa los datos de la sesión (persistencia).
     if request.method == "POST":
-        # POST: Obtener de la forma y guardar en sesión
+        # POST: TOMA de la forma y guarda en sesión
         nombre_cliente = request.form.get("nombre_cliente", "")
         email_cliente = request.form.get("email_cliente", "")
         
-        session["nombre_cliente"] = nombre_cliente # <-- GUARDAR EN SESIÓN
-        session["email_cliente"] = email_cliente   # <-- GUARDAR EN SESIÓN
+        session["nombre_cliente"] = nombre_cliente 
+        session["email_cliente"] = email_cliente   
         
-        # También cargamos datos de anillo desde el POST
+        # Anillos: TOMA de la forma (o sesión si no vino en forma)
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
         talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
@@ -235,11 +249,13 @@ def formulario():
         talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
         
     else:
-        # GET (Visita inicial o regreso del catálogo): Obtener de la sesión
-        nombre_cliente = session.get("nombre_cliente", "") # <-- OBTENER DE SESIÓN
-        email_cliente = session.get("email_cliente", "")   # <-- OBTENER DE SESIÓN
+        # GET (Visita inicial, regreso de catálogo, o recarga)
+        
+        # Cliente: TOMA de la sesión (vacío si es la primera vez gracias a la limpieza inicial)
+        nombre_cliente = session.get("nombre_cliente", "") 
+        email_cliente = session.get("email_cliente", "")   
 
-        # Datos de anillo desde la sesión (con valores por defecto si no existen)
+        # Anillos: TOMA de la sesión (con valores por defecto si no existen)
         kilates_dama = session.get("kilates_dama", "14")
         ancho_dama = session.get("ancho_dama", "")
         talla_dama = session.get("talla_dama", "")
@@ -248,49 +264,33 @@ def formulario():
         ancho_cab = session.get("ancho_cab", "")
         talla_cab = session.get("talla_cab", "")
         
-        # Lógica de limpieza/inicialización de modelos (solo si es la visita inicial/limpia)
-        if request.method == "GET" and not fresh_selection:
-            # Caso 1: GET limpio (navegación directa). ¡Limpiar sesión de modelos y datos de cliente!
-            modelo_dama = t['seleccionar'].upper()
-            metal_dama = ""
-            modelo_cab = t['seleccionar'].upper()
-            metal_cab = ""
-            nombre_cliente = "" # <-- Forzar limpieza solo en la visita inicial sin fresh_selection
-            email_cliente = ""  # <-- Forzar limpieza solo en la visita inicial sin fresh_selection
-            
-            # Limpiar la sesión para garantizar la persistencia del estado limpio
-            for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "nombre_cliente", "email_cliente"]:
-                 if key in session:
-                    del session[key]
-
-        else:
-            # Caso 2: POST O GET después de /catalogo (fresh_selection=True)
-            # Cargamos los modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
-            modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
-            metal_dama = session.get("metal_dama", "").upper()
-            modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
-            metal_cab = session.get("metal_cab", "").upper()
-            
-            # Si venimos del catálogo, reseteamos el ancho/talla (pero conservamos nombre/email)
-            if fresh_selection:
-                ancho_dama = ""
-                talla_dama = ""
-                ancho_cab = ""
-                talla_cab = ""
-            # Si NO es fresh_selection (i.e. POST de idioma o POST de guardar), se usa la lógica de POST anterior.
+        # Modelos/Metales: TOMA de la sesión (con valor por defecto si no existe)
+        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
+        metal_dama = session.get("metal_dama", "").upper()
+        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
+        metal_cab = session.get("metal_cab", "").upper()
+        
+        # Si venimos del catálogo, reseteamos el ancho/talla para forzar la selección por defecto (más limpio)
+        if fresh_selection:
+            ancho_dama = ""
+            talla_dama = ""
+            ancho_cab = ""
+            talla_cab = ""
 
     
-    # Guardar TODAS las selecciones de anillo en sesión para persistencia (Nombre/Email ya se guardaron en la rama POST si aplica)
-    session["kilates_dama"] = kilates_dama
-    session["ancho_dama"] = ancho_dama
-    session["talla_dama"] = talla_dama
-    session["kilates_cab"] = kilates_cab
-    session["ancho_cab"] = ancho_cab
-    session["talla_cab"] = talla_cab
-    session["modelo_dama"] = modelo_dama
-    session["metal_dama"] = metal_dama
-    session["modelo_cab"] = modelo_cab
-    session["metal_cab"] = metal_cab
+    # 4. Guardar las selecciones de anillo en sesión (para POST y para que GETs futuros las mantengan)
+    if request.method == "POST" or fresh_selection or not session.get("modelo_dama"): 
+        session["kilates_dama"] = kilates_dama
+        session["ancho_dama"] = ancho_dama
+        session["talla_dama"] = talla_dama
+        session["kilates_cab"] = kilates_cab
+        session["ancho_cab"] = ancho_cab
+        session["talla_cab"] = talla_cab
+        session["modelo_dama"] = modelo_dama
+        session["metal_dama"] = metal_dama
+        session["modelo_cab"] = modelo_cab
+        session["metal_cab"] = metal_cab
+
 
     # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
@@ -299,13 +299,10 @@ def formulario():
         
         filtro_ancho = (df["NAME"] == modelo)
         
-        # Función auxiliar para ordenar numéricamente
         def sort_numeric_key(value_str):
             try:
-                # Intenta convertir a flotante (maneja 10, 10.5, 3, 3.25, etc.)
                 return float(value_str)
             except ValueError:
-                # Pone los valores no numéricos al final
                 return float('inf') 
                 
         # 1. ORDENAMIENTO NUMÉRICO DEL ANCHO
@@ -325,18 +322,18 @@ def formulario():
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
-            session["ancho_dama"] = ancho_dama # Guardar por defecto
+            session["ancho_dama"] = ancho_dama 
         if not talla_dama and tallas_d:
             talla_dama = tallas_d[0]
-            session["talla_dama"] = talla_dama # Guardar por defecto
+            session["talla_dama"] = talla_dama 
 
     if modelo_cab != t['seleccionar'].upper():
         if not ancho_cab and anchos_c:
             ancho_cab = anchos_c[0]
-            session["ancho_cab"] = ancho_cab # Guardar por defecto
+            session["ancho_cab"] = ancho_cab 
         if not talla_cab and tallas_c:
             talla_cab = tallas_c[0]
-            session["talla_cab"] = talla_cab # Guardar por defecto
+            session["talla_cab"] = talla_cab 
 
     # --- Cálculo dama ---
     peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
@@ -741,5 +738,7 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == '__main__':
+    # Asegúrate de que el archivo 'Formulario Catalogo.xlsm' exista en el mismo directorio.
+    # Además, crea un archivo 'static/logo.png' (o cualquier imagen que uses) para evitar fallos de ruta.
     logging.info("\n--- INICIANDO SERVIDOR FLASK EN MODO DESARROLLO ---")
     app.run(debug=True)
