@@ -32,7 +32,6 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    # Usa tu propia API Key si tienes una.
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -94,17 +93,18 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         # 3. Limpieza de valores clave
         for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO"]: 
             if col in df.columns:
-                df[col] = df[col].astype(str).str.strip()
+                # Estandarizar las columnas clave a string mayúscula y sin espacios
+                df[col] = df[col].astype(str).str.strip().str.upper() 
             
         for col in ["SIZE", "ADICIONAL"]: 
             if col in df_adicional.columns:
-                df_adicional[col] = df_adicional[col].astype(str).str.strip()
+                df_adicional[col] = df_adicional[col].astype(str).str.strip().str.upper()
         
         df_global = df
         df_adicional_global = df_adicional
         
-        logging.warning(f"Columnas df (WEDDING BANDS) con ANCHO y GENERO: {df.columns.tolist()}")
-        logging.warning(f"Columnas df_adicional (SIZE): {df_adicional.columns.tolist()}")
+        logging.info(f"Columnas df (WEDDING BANDS): {df.columns.tolist()}")
+        logging.info(f"Columnas df_adicional (SIZE): {df_adicional.columns.tolist()}")
         
         return df, df_adicional
         
@@ -116,7 +116,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     """Extrae solo el nombre del archivo del path."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        return "placeholder.png" # Usar un placeholder si no hay ruta
+        return "placeholder.png"
     
     ruta_limpia = str(ruta_completa).replace('\\', '/')
     nombre_archivo = os.path.basename(ruta_limpia).strip()
@@ -126,12 +126,13 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     """Busca peso y costos fijo/adicional."""
     global df_global 
     
-    # Manejar caso de valor numérico en ancho o talla
-    try: ancho = str(float(ancho)) if ancho else ancho
-    except ValueError: pass
-    try: talla = str(float(talla)) if talla else talla
-    except ValueError: pass
-    
+    # Estandarizar los inputs de búsqueda
+    modelo = modelo.upper()
+    metal = metal.upper()
+    ancho = ancho.upper()
+    talla = talla.upper()
+    genero = genero.upper()
+
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0 
         
@@ -208,10 +209,10 @@ def formulario():
     if is_initial_load:
         # Limpiar completamente la sesión para un inicio limpio
         for key in list(session.keys()):
-             # Mantenemos idioma y datos de cliente si existen
              if key not in ["idioma", "nombre_cliente", "email_cliente"]:
                  session.pop(key, None)
              
+        # Valores por defecto para el inicio
         nombre_cliente = session.get("nombre_cliente", "")
         email_cliente = session.get("email_cliente", "")
         modelo_dama = DEFAULT_SELECTION_TEXT
@@ -229,7 +230,7 @@ def formulario():
         nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
         email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
         
-        # El modelo y metal siempre vienen de la sesión (establecidos en /catalogo)
+        # Modelo y Metal vienen de la sesión (establecidos en /catalogo)
         modelo_dama = session.get("modelo_dama", DEFAULT_SELECTION_TEXT).upper()
         metal_dama = session.get("metal_dama", "").upper()
         modelo_cab = session.get("modelo_cab", DEFAULT_SELECTION_TEXT).upper()
@@ -239,16 +240,14 @@ def formulario():
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
 
-        # Si viene de fresh_selection (catálogo) o un cambio de kilates/idioma (POST y submit), limpiamos ancho/talla para forzar autoselección
-        is_selector_change = request.method == "POST" and ("kilates_dama" in request.form or "kilates_cab" in request.form or "idioma" in request.form)
-        
-        if fresh_selection or is_selector_change:
+        # Si venimos del catálogo (fresh_selection=True), debemos forzar la autoselección de ancho/talla
+        if fresh_selection:
             ancho_dama = ""
             talla_dama = ""
             ancho_cab = ""
             talla_cab = ""
         else:
-            # Si no hay cambio, cargamos el último valor enviado por POST o guardado en sesión.
+            # Si NO es fresh_selection, cargamos el último valor enviado por POST o guardado en sesión.
             ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
             talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
             ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
@@ -270,7 +269,8 @@ def formulario():
         session["ancho_cab"] = ancho_cab
         session["talla_cab"] = talla_cab
         
-        # Redirigir si se cambió algo que requiere recálculo o recarga (kilates, idioma, ancho, talla)
+        # Redirigir si se cambió idioma o kilates, ancho, o talla (auto-submit)
+        # Esto asegura que el cálculo se realice con el estado de sesión actualizado
         if "idioma" in request.form or "kilates_dama" in request.form or "kilates_cab" in request.form or "ancho_dama" in request.form or "ancho_cab" in request.form or "talla_dama" in request.form or "talla_cab" in request.form:
              return redirect(url_for("formulario"))
 
@@ -282,17 +282,17 @@ def formulario():
         
         filtro_ancho = (df["NAME"] == modelo)
         
-        # Ordenar numéricamente el ancho
+        # Función de ordenación numérica (maneja floats y strings)
         def sort_numeric(value_str):
-            try: return float(value_str)
+            try: return float(value_str.replace(',', '.'))
             except ValueError: return float('inf') 
         
-        anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
+        anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().str.upper().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric)
         
         # Ordenar numéricamente la talla
-        tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
-        # Expresión regular para extraer números y ordenar por ellos primero.
+        tallas_raw = df_adicional["SIZE"].astype(str).str.strip().str.upper().unique().tolist() if "SIZE" in df_adicional.columns else []
+        # Ordena por el valor numérico extraído de la talla
         tallas = sorted(tallas_raw, key=lambda x: (sort_numeric(re.sub(r'[^\d\.]', '', x)), x))
         
         return anchos, tallas
@@ -310,7 +310,7 @@ def formulario():
             if not actual_talla and tallas_disponibles:
                 actual_talla = tallas_disponibles[0]
         
-        # Guardar en sesión para asegurar que se usen en el cálculo antes del submit
+        # Guardar en sesión (necesario para el cálculo antes del POST si no se hizo submit)
         session[session_key_ancho] = actual_ancho
         session[session_key_talla] = actual_talla
             
@@ -341,7 +341,7 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # Siempre permitimos la selección de Kilates
+        # Selector de Kilates
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -351,7 +351,6 @@ def formulario():
             </div>
         """
         
-        # Mostrar advertencia si no hay modelo/metal seleccionado
         if modelo == DEFAULT_SELECTION_TEXT or not anchos or not tallas:
             warning_msg = f'<p class="text-red-500 pt-3">Modelo: <span class="font-bold">{modelo} ({metal if metal else "No Seleccionado"})</span>. Seleccione un modelo/metal para habilitar Ancho y Talla.</p>'
             if modelo != DEFAULT_SELECTION_TEXT and (not anchos or not tallas):
@@ -359,7 +358,7 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # Si hay selección, mostrar selectores de Ancho y Talla (con autocalculo)
+        # Selectores de Ancho y Talla - **AÑADIDO onchange="this.form.submit()"** para el recálculo
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -542,7 +541,6 @@ def catalogo():
         
         if seleccion and tipo:
             try:
-                # El valor de 'seleccion' es "MODELO;METAL"
                 modelo, metal = seleccion.split(";")
                 
                 # Guardamos los nuevos valores en la sesión
@@ -563,7 +561,9 @@ def catalogo():
          html_error = f"""<!DOCTYPE html><html><body><div style="text-align: center; padding: 50px;"><h1 style="color: red;">Error de Carga de Datos</h1><p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p><a href="{url_for('formulario')}">Volver al Formulario</a></div></body></html>"""
          return render_template_string(html_error)
 
+    # Filtrar solo las columnas necesarias para el catálogo
     df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
+    # Obtener filas únicas
     variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
     
     catalogo_items = []
@@ -665,10 +665,11 @@ def catalogo():
         modelo = item['modelo']
         metal = item['metal']
         nombre_foto = item['nombre_foto']
+        # url_for('static',...) asume que tienes un directorio 'static' en tu proyecto.
         ruta_web_foto = url_for('static', filename=nombre_foto) 
         valor_seleccion = f"{modelo};{metal}"
         
-        # Lógica para aplicar el resaltado y la etiqueta
+        # Lógica para aplicar el resaltado
         borde_clase = "border border-gray-200"
         etiqueta = ""
         
@@ -727,4 +728,8 @@ def catalogo():
 
 if __name__ == '__main__':
     logging.info("\n--- INICIANDO SERVIDOR FLASK EN MODO DESARROLLO ---")
+    
+    # Crea un directorio 'static' y añade 'logo.png' y 'placeholder.png'
+    os.makedirs('static', exist_ok=True) 
+    
     app.run(debug=True)
