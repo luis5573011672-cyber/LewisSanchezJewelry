@@ -182,9 +182,6 @@ def limpiar_sesion_inicial():
         if key in session:
             del session[key]
     
-
-  # ... (Funciones de utilidad y configuración global sin cambios) ...
-
 # --------------------- RUTAS FLASK ---------------------
 
 @app.route("/", methods=["GET", "POST"])
@@ -193,6 +190,7 @@ def formulario():
     
     # 1. Limpieza de sesión en la primera carga (GET sin fresh_selection)
     if request.method == "GET" and not request.args.get("fresh_selection"):
+        # Usamos una clave de control para saber si ya se limpió la sesión
         if not session.get("sesion_iniciada"):
             limpiar_sesion_inicial()
             session["sesion_iniciada"] = True # Marcamos la sesión como iniciada/limpia
@@ -232,11 +230,7 @@ def formulario():
     fresh_selection = request.args.get("fresh_selection")
     
     # --- 3. Obtener/Establecer Datos del Cliente y Anillos ---
-    
-    # **CORRECCIÓN CLAVE:** Cargar Cliente desde la Sesión/Forma.
-    # Si hay POST, toma de la forma y guarda en sesión. 
-    # Si es GET, toma de la sesión (o vacío si es la primera carga limpia).
-    
+
     if request.method == "POST":
         # POST: TOMA de la forma y guarda en sesión
         nombre_cliente = request.form.get("nombre_cliente", "")
@@ -254,16 +248,10 @@ def formulario():
         ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
         talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
         
-        # Modelos/Metales: TOMA de la sesión (fueron guardados por catálogo o post anterior)
-        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
-        metal_dama = session.get("metal_dama", "").upper()
-        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
-        metal_cab = session.get("metal_cab", "").upper()
-
     else:
         # GET (Visita inicial, regreso de catálogo, o recarga)
         
-        # Cliente: TOMA de la sesión (vacío si es la primera vez)
+        # Cliente: TOMA de la sesión (vacío si es la primera vez gracias a la limpieza inicial)
         nombre_cliente = session.get("nombre_cliente", "") 
         email_cliente = session.get("email_cliente", "")   
 
@@ -291,21 +279,19 @@ def formulario():
 
     
     # 4. Guardar las selecciones de anillo en sesión (para POST y para que GETs futuros las mantengan)
-    session["kilates_dama"] = kilates_dama
-    session["ancho_dama"] = ancho_dama
-    session["talla_dama"] = talla_dama
-    session["kilates_cab"] = kilates_cab
-    session["ancho_cab"] = ancho_cab
-    session["talla_cab"] = talla_cab
-    session["modelo_dama"] = modelo_dama
-    session["metal_dama"] = metal_dama
-    session["modelo_cab"] = modelo_cab
-    session["metal_cab"] = metal_cab
+    if request.method == "POST" or fresh_selection or not session.get("modelo_dama"): 
+        session["kilates_dama"] = kilates_dama
+        session["ancho_dama"] = ancho_dama
+        session["talla_dama"] = talla_dama
+        session["kilates_cab"] = kilates_cab
+        session["ancho_cab"] = ancho_cab
+        session["talla_cab"] = talla_cab
+        session["modelo_dama"] = modelo_dama
+        session["metal_dama"] = metal_dama
+        session["modelo_cab"] = modelo_cab
+        session["metal_cab"] = metal_cab
 
 
-    # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
-    # ... (El código de get_options, forzar ancho/talla y cálculo sigue igual) ...
-    
     # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
@@ -539,7 +525,220 @@ def formulario():
     </html>
     """
     return render_template_string(html_form)
-    
-# ... (El resto del código como 'catalogo()' y 'if __name__ == "__main__":' permanece sin cambios) ...
 
-# Nota: Si estás ejecutando Flask, reemplaza el código completo con este, manteniendo las funciones de utilidad sin cambios.
+# ------------------------------------------------------------------------------------------------
+
+@app.route("/catalogo", methods=["GET", "POST"])
+def catalogo():
+    """Ruta del catálogo: selecciona Modelo y Metal. 
+    Permite múltiples selecciones (Dama y Caballero) antes de regresar al formulario.
+    """
+    df, _ = cargar_datos()
+    
+    mensaje_exito = None
+    
+    if request.method == "POST":
+        seleccion = request.form.get("seleccion")
+        tipo = request.form.get("tipo")
+        
+        # Lógica de Retorno al Formulario
+        if not seleccion:
+            # Al volver, Nombre y Correo ya están en la sesión y se recargarán en el formulario
+            return redirect(url_for("formulario", fresh_selection=True))
+        
+        # Lógica de Selección de Anillo
+        if seleccion and tipo:
+            try:
+                modelo, metal = seleccion.split(";")
+                session[f"modelo_{tipo}"] = modelo.strip().upper()
+                session[f"metal_{tipo}"] = metal.strip().upper()
+                session[f"ancho_{tipo}"] = ""
+                session[f"talla_{tipo}"] = ""
+                
+                tipo_display = "Dama" if tipo == "dama" else "Caballero"
+                mensaje_exito = f"✅ ¡Modelo y Metal para {tipo_display} guardado! Seleccione el otro o presione 'Volver al Formulario'."
+                
+            except ValueError:
+                logging.error("Error en el formato de selección del catálogo.")
+                mensaje_exito = "❌ Error al procesar la selección."
+
+
+    # Generación del catálogo
+    idioma = session.get("idioma", "Español")
+    es = idioma == "Español"
+    
+    t = {
+        # Título del catálogo se mantiene descriptivo
+        "titulo": "Catálogo de Anillos de Boda" if es else "WEDDING RING CATALOG", 
+        "volver": "Volver al Formulario" if es else "Back to Form",
+        "dama": "Dama" if es else "Lady",
+        "caballero": "Caballero" if es else "Gentleman",
+        "metal": "Metal" if es else "Metal",
+    }
+    
+    # Obtener selecciones actuales para mostrarlas en el catálogo
+    modelo_dama_actual = session.get("modelo_dama", "")
+    metal_dama_actual = session.get("metal_dama", "")
+    modelo_cab_actual = session.get("modelo_cab", "")
+    metal_cab_actual = session.get("metal_cab", "")
+    
+    # URL de la imagen
+    logo_url = url_for('static', filename='logo.png')
+    
+    if df.empty:
+         html_catalogo = f"""
+        <!DOCTYPE html>
+        <html><body><div style="text-align: center; padding: 50px;">
+        <h1 style="color: red;">Error de Carga de Datos</h1>
+        <p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p>
+        <p>Asegúrese de que '{EXCEL_PATH}' existe y tiene datos.</p>
+        <a href="{url_for('formulario')}">Volver al Formulario</a>
+        </div></body></html>
+        """
+         return render_template_string(html_catalogo)
+
+
+    # LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal)
+    df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
+    variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
+    
+    catalogo_items = []
+    for _, fila in variantes_unicas.iterrows():
+        modelo = str(fila["NAME"]).strip().upper()
+        metal = str(fila["METAL"]).strip().upper()
+        ruta_foto = str(fila["RUTA FOTO"]).strip()
+        
+        catalogo_items.append({
+            "modelo": modelo,
+            "metal": metal,
+            "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto)
+        })
+
+    # --------------------- HTML/JINJA2 para el Catálogo (CSS y Estructura Corregida) ---------------------
+    
+    html_catalogo = f"""
+    <!DOCTYPE html>
+    <html lang="{idioma.lower()}">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{t['titulo']}</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+            body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
+            .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); transition: all 0.2s; }}
+            .card.selected-dama {{ border: 3px solid #EC4899; }}
+            .card.selected-cab {{ border: 3px solid #3B82F6; }}
+            .card.selected-both {{ border: 3px solid #10B981; }}
+            .selection-status {{ font-size: 0.75rem; font-weight: 600; margin-top: 4px; }}
+            /* Estilos para el contenedor del título y logo en el catálogo (Ajustados para centrado) */
+            .title-container {{ 
+                display: flex; 
+                align-items: center; 
+                justify-content: space-between; /* Mantiene logo izq, espacio central para título */
+                margin-bottom: 1rem;
+                width: 100%;
+            }}
+            .logo-img {{ 
+                height: 60px; /* Logo más grande */
+                margin-right: 15px; /* Espacio entre el logo y el título */
+            }}
+            @media (max-width: 640px) {{
+                .logo-img {{ height: 40px; }}
+            }}
+            h1 {{ 
+                flex-grow: 1; /* Ocupa el espacio central */
+                text-align: center; /* CENTRA EL TEXTO dentro del h1 */
+                margin: 0; /* Elimina márgenes por defecto del h1 */
+            }} 
+        </style>
+    </head>
+    <body class="p-4 md:p-8">
+        <div class="max-w-7xl mx-auto">
+            
+            <div class="title-container">
+                <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
+                
+<div style="width: 60px; margin-left: 15px;"></div> 
+            </div>
+            
+            {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
+
+            <form method="POST" action="{url_for('catalogo')}">
+                <div class="mb-8 text-center">
+                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150" name="volver_btn" value="true">
+                        {t['volver']}
+                    </button>
+                </div>
+            
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+    """
+    
+    # Iterar sobre la lista de variantes únicas
+    for item in catalogo_items:
+        modelo = item['modelo']
+        metal = item['metal']
+        nombre_foto = item['nombre_foto']
+        ruta_web_foto = url_for('static', filename=nombre_foto) 
+        valor_seleccion = f"{modelo};{metal}"
+        
+        # Lógica de estado de selección para el Card
+        is_dama = modelo == modelo_dama_actual and metal == metal_dama_actual
+        is_cab = modelo == modelo_cab_actual and metal == metal_cab_actual
+        card_class = "card"
+        status_text = ""
+        
+        if is_dama and is_cab:
+            card_class += " selected-both"
+            status_text = "✅ Ambos seleccionados"
+        elif is_dama:
+            card_class += " selected-dama"
+            status_text = f"✅ {t['dama']} seleccionada"
+        elif is_cab:
+            card_class += " selected-cab"
+            status_text = f"✅ {t['caballero']} seleccionado"
+
+
+        html_catalogo += f"""
+                    <div class="{card_class} p-4 flex flex-col items-center text-center">
+                        <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
+                             class="w-full h-auto max-h-48 object-contain rounded-lg mb-3" 
+                             onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
+                        >
+                        <p class="text-xl font-bold text-gray-900 mb-1">{modelo}</p>
+                        <p class="text-md font-semibold text-indigo-700 mb-2">{t['metal']}: {metal}</p>
+                        <p class="selection-status text-green-600">{status_text}</p>
+
+                        <div class="mt-2 space-y-3 w-full border-t pt-3">
+                            <button type="submit" name="seleccion" value="{valor_seleccion}" 
+                                    class="inline-block w-full px-3 py-1.5 text-white bg-pink-500 rounded text-sm font-semibold hover:bg-pink-600 transition duration-150 text-center mb-1" 
+                                    onclick="document.getElementById('tipo_input').value='dama';">
+                                Seleccionar {t['dama']}
+                            </button>
+                            
+                            <button type="submit" name="seleccion" value="{valor_seleccion}" 
+                                    class="inline-block w-full px-3 py-1.5 text-white bg-blue-500 rounded text-sm font-semibold hover:bg-blue-600 transition duration-150 text-center"
+                                    onclick="document.getElementById('tipo_input').value='cab';">
+                                Seleccionar {t['caballero']}
+                            </button>
+                        </div>
+                    </div>
+                    """
+
+    html_catalogo += """
+                </div>
+                <input type="hidden" id="tipo_input" name="tipo" value="">
+            </form>
+        </div>
+    </body>
+    </html>
+    """
+    return render_template_string(html_catalogo)
+
+if __name__ == '__main__':
+    # Asegúrate de que el archivo 'Formulario Catalogo.xlsm' exista en el mismo directorio.
+    # Además, crea un archivo 'static/logo.png' (o cualquier imagen que uses) para evitar fallos de ruta.
+    logging.info("\n--- INICIANDO SERVIDOR FLASK EN MODO DESARROLLO ---")
+    app.run(debug=True)
