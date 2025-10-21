@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO)
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
 # Es CRUCIAL que la clave secreta se establezca para que las sesiones funcionen.
+# DEBES CAMBIAR ESTA CLAVE EN PRODUCCIÓN
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
 # Asegúrate de que este archivo exista en la misma ubicación que tu script.
@@ -27,8 +28,7 @@ df_adicional_global = pd.DataFrame()
 
 def obtener_precio_oro() -> Tuple[float, str]:
     """
-    Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
-    Retorna (precio, estado) donde estado es "live" o "fallback".
+    Obtiene el precio actual del oro (XAU/USD) por onza.
     """
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
@@ -43,7 +43,7 @@ def obtener_precio_oro() -> Tuple[float, str]:
         if price is not None and not math.isnan(price):
             return float(price), "live"
             
-        logging.warning("API respondió OK (200), pero faltaba o era inválido el precio. Usando fallback.")
+        logging.warning("API respondió OK (200), pero el precio era inválido. Usando fallback.")
         return DEFAULT_GOLD_PRICE, "fallback"
         
     except (requests.exceptions.RequestException, Exception) as e:
@@ -61,9 +61,7 @@ def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: f
     return valor_gramo, monto_total
 
 def calcular_monto_aproximado(monto_bruto: float) -> float:
-    """
-    Aproxima (redondea hacia arriba) el monto al múltiplo de 10 más cercano.
-    """
+    """Aproxima (redondea hacia arriba) el monto al múltiplo de 10 más cercano."""
     if monto_bruto <= 0:
         return 0.0
     
@@ -129,7 +127,7 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional en los DataFrames."""
     
-    global df_global # Accedemos al df global para la búsqueda
+    global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0 
@@ -215,8 +213,7 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # ⚠️ AJUSTE DE PERSISTENCIA 1: MANEJO DE INICIO FRESCO O RESETEO COMPLETO
-    # Evitamos que se borren los datos de nombre/email si ya existen.
+    # ⚠️ MANEJO DE INICIO FRESCO O RESETEO COMPLETO
     is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
     if is_root_get and session.get("modelo_dama") is None:
         logging.info("Inicio fresco: Inicializando valores de anillo por defecto.")
@@ -237,7 +234,6 @@ def formulario():
     if request.method == "POST":
         
         # 2.1. Guardar SIEMPRE los datos del cliente que vinieron en el POST
-        # Esto guarda los datos ANTES de que el usuario vaya al catálogo, asegurando persistencia en Session.
         nombre_cliente = request.form.get("nombre_cliente", nombre_cliente)
         email_cliente = request.form.get("email_cliente", email_cliente)
         session["nombre_cliente"] = nombre_cliente 
@@ -248,14 +244,10 @@ def formulario():
               return redirect(url_for("formulario"))
         
         # 2.3. Guardar las selecciones de anillo que vinieron en el POST
-        # Cuando solo se cambia el kilate, los valores de ancho/talla se mantienen.
-        
-        # Anillo Dama
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
         
-        # Anillo Caballero
         kilates_cab = request.form.get("kilates_cab", kilates_cab)
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
@@ -519,23 +511,23 @@ def formulario():
             const emailInput = document.getElementById('email_cliente');
 
             // 1. Cargar datos de localStorage al cargar la página
-            // La prioridad es: 1. Flask Session (POST más reciente) -> 2. localStorage (si Session está vacío)
-            document.addEventListener('DOMContentLoaded', () => {
-                if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {
+            document.addEventListener('DOMContentLoaded', () => {{
+                // Usar {{ y }} para escapar las llaves de JavaScript de la f-string de Python
+                if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
                     nombreInput.value = localStorage.getItem('nombre_cliente');
-                }
-                if (!emailInput.value && localStorage.getItem('email_cliente')) {
+                }}
+                if (!emailInput.value && localStorage.getItem('email_cliente')) {{
                     emailInput.value = localStorage.getItem('email_cliente');
-                }
-            });
+                }}
+            }});
 
             // 2. Guardar datos en localStorage al cambiar el input (en tiempo real)
-            nombreInput.addEventListener('input', (e) => {
+            nombreInput.addEventListener('input', (e) => {{
                 localStorage.setItem('nombre_cliente', e.target.value);
-            });
-            emailInput.addEventListener('input', (e) => {
+            }});
+            emailInput.addEventListener('input', (e) => {{
                 localStorage.setItem('email_cliente', e.target.value);
-            });
+            }});
         </script>
     </body>
     </html>
@@ -546,9 +538,8 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    """Ruta del catálogo: selecciona Modelo y Metal. 
-    Permite múltiples selecciones (Dama y Caballero) antes de regresar al formulario.
-    """
+    """Ruta del catálogo: selecciona Modelo y Metal."""
+    
     df, _ = cargar_datos()
     
     mensaje_exito = None
@@ -717,7 +708,7 @@ def catalogo():
             status_text = f"✅ {t['caballero']} seleccionado"
 
 
-        # AJUSTE: Usamos formularios individuales para cada botón de selección
+        # Se usan formularios individuales para asegurar que se envíe el par seleccion/tipo
         html_catalogo += f"""
                     <div class="{card_class} p-4 flex flex-col items-center text-center">
                         <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
