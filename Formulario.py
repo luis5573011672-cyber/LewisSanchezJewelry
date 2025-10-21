@@ -61,7 +61,7 @@ def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: f
         return 0.0, 0.0
     
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
-    monto_total = valor_gramo * peso_gramos
+    monto_total = valor_gramo * peso_gramo
     return valor_gramo, monto_total
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -193,6 +193,7 @@ def formulario():
     # --- 1. Inicialización/Limpieza ---
     # Limpiar solo en el GET inicial sin parámetros (inicio de la aplicación)
     if request.method == "GET" and not fresh_selection and not any(key in session for key in ["nombre_cliente", "modelo_dama", "modelo_cab"]):
+        # Limpiar completamente al inicio
         for key in ["nombre_cliente", "email_cliente", "modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "kilates_dama", "ancho_dama", "talla_dama", "kilates_cab", "ancho_cab", "talla_cab"]:
              session.pop(key, None)
 
@@ -211,6 +212,7 @@ def formulario():
         
     else:
         # Cargar de la sesión o del formulario (POST)
+        # PERSISTENCIA de datos del cliente
         nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
         email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
@@ -222,7 +224,8 @@ def formulario():
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
 
-        # Si se cambia de modelo/metal (fresh_selection) o kilates, reiniciamos Ancho y Talla para forzar la autoselección
+        # Si hay una selección nueva de modelo/metal (fresh_selection) o cambio de kilates, 
+        # reiniciamos Ancho y Talla para forzar la autoselección a los nuevos valores disponibles.
         if fresh_selection or (request.method == "POST" and ("kilates_dama" in request.form or "kilates_cab" in request.form)):
             ancho_dama = ""
             talla_dama = ""
@@ -253,7 +256,6 @@ def formulario():
         
         # Redirigir para POST a GET solo si se cambió algo que requiere recálculo o recarga
         if "idioma" in request.form or "kilates_dama" in request.form or "kilates_cab" in request.form or "ancho_dama" in request.form or "ancho_cab" in request.form or "talla_dama" in request.form or "talla_cab" in request.form:
-             # Se redirige sin fresh_selection para que use los valores guardados
              return redirect(url_for("formulario"))
 
 
@@ -513,7 +515,8 @@ def catalogo():
         
         # Manejo del botón "Volver al Formulario"
         if request.form.get("volver_btn") == "true":
-            # Si simplemente regresa, no hay nueva selección de anillo, solo vuelve al formulario
+            # Si simplemente regresa, vuelve al formulario.
+            # Los datos del cliente se guardaron en la sesión en el formulario principal antes de ir al catálogo.
             return redirect(url_for("formulario"))
 
         seleccion = request.form.get("seleccion")
@@ -521,13 +524,14 @@ def catalogo():
         
         if seleccion and tipo:
             try:
-                # Guardar la nueva selección y redirigir con la bandera fresh_selection=True
+                # Guardar la nueva selección en la sesión
                 modelo, metal = seleccion.split(";")
                 session[f"modelo_{tipo}"] = modelo.strip().upper()
                 session[f"metal_{tipo}"] = metal.strip().upper()
                 
-                # Redirigir con un argumento para indicar que es una selección nueva
-                return redirect(url_for("formulario", fresh_selection=True))
+                # NO REDIRIGE AL FORMULARIO. Permanece en el catálogo para hacer la siguiente selección.
+                # Redirige a sí mismo para limpiar el POST y mostrar las etiquetas actualizadas.
+                return redirect(url_for("catalogo")) 
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
                 
@@ -542,7 +546,38 @@ def catalogo():
         "dama": "Dama" if es else "Lady",
         "caballero": "Caballero" if es else "Gentleman",
         "metal": "Metal" if es else "Metal",
+        "seleccion_actual": "Selección Actual" if es else "Current Selection"
     }
+    
+    # Recuperar selecciones actuales para las etiquetas
+    modelo_dama = session.get("modelo_dama", "")
+    metal_dama = session.get("metal_dama", "")
+    modelo_cab = session.get("modelo_cab", "")
+    metal_cab = session.get("metal_cab", "")
+    
+    # Etiquetas de Selección Actual en el Catálogo
+    etiquetas_catalogo = ""
+    # Se muestra si al menos una selección (Dama o Caballero) está en la sesión
+    if modelo_dama or modelo_cab:
+        etiquetas_catalogo += f"""
+        <div class="p-4 rounded-lg bg-indigo-50 mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-3">{t['seleccion_actual']}</h2>
+            <div class="flex flex-wrap gap-3">
+        """
+        if modelo_dama and modelo_dama != "SELECCIONE UNA OPCIÓN DE CATÁLOGO":
+            etiquetas_catalogo += f"""
+            <span class="bg-pink-200 text-pink-900 text-sm font-medium px-3 py-1 rounded-full">
+                {t['dama']}: {modelo_dama} ({metal_dama})
+            </span>
+            """
+        if modelo_cab and modelo_cab != "SELECCIONE UNA OPCIÓN DE CATÁLOGO":
+            etiquetas_catalogo += f"""
+            <span class="bg-blue-200 text-blue-900 text-sm font-medium px-3 py-1 rounded-full">
+                {t['caballero']}: {modelo_cab} ({metal_cab})
+            </span>
+            """
+        etiquetas_catalogo += "</div></div>"
+    
     
     # --- LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal) ---
     if df.empty:
@@ -583,7 +618,7 @@ def catalogo():
             .header-container {{
                 display: flex;
                 align-items: center;
-                justify-content: space-between;
+                justify-content: flex-start; /* Alineación a la izquierda */
                 margin-bottom: 24px;
             }}
             .logo-img {{
@@ -594,12 +629,13 @@ def catalogo():
             .title-content {{
                 flex-grow: 1;
                 text-align: center;
+                padding-right: 150px; /* Espacio para el botón de volver */
             }}
             .title-content h1 {{
                 margin: 0;
             }}
             .back-btn-container {{
-                min-width: 150px; /* Asegura espacio para el botón */
+                min-width: 150px; 
                 text-align: right;
             }}
         </style>
@@ -621,6 +657,8 @@ def catalogo():
                         </button>
                     </div>
                 </div>
+                
+                {etiquetas_catalogo}
                 
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
     """
