@@ -193,7 +193,7 @@ def formulario():
 
     t = {
         # MODIFICACIÓN 1: Cambiar el título en español a "PRESUPUESTO"
-        "titulo": "PRESUPUESTO" if es else "ESTIMATE",
+        "titulo": "PRESUPUESTO" if es else "Estimate or Work Order Form",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
         "ancho": "Ancho (mm)" if es else "Width (mm)",
@@ -415,29 +415,58 @@ def formulario():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
-            .title-container {{ display: flex; justify-content: center; align-items: center; margin-bottom: 1rem; }}
-            .logo-img {{ height: 40px; margin-right: 10px; }} /* Ajusta el tamaño aquí */
+            /* Estilos para el contenedor del título y logo */
+            .header-content {{ 
+                display: flex; 
+                align-items: center; 
+                justify-content: space-between; /* Empuja el logo a la izquierda y el idioma a la derecha */
+                width: 100%;
+                margin-bottom: 1rem;
+            }}
+            .title-group {{
+                display: flex;
+                align-items: center;
+                flex-grow: 1; /* Permite que el grupo de título ocupe espacio y centre su contenido */
+                justify-content: center; /* Centra el título dentro del grupo */
+                position: relative; /* Para que el logo pueda posicionarse sin afectar el centrado del título */
+            }}
+            .logo-img {{ 
+                height: 60px; /* Logo más grande */
+                position: absolute; /* Posicionamiento absoluto para no afectar el centrado del título */
+                left: 0;
+            }}
+            /* Ajuste para pantallas pequeñas si el logo es muy grande */
+            @media (max-width: 640px) {{
+                .logo-img {{ height: 40px; }}
+            }}
+            h1 {{ margin: 0; }} /* Asegurarse de que el h1 no tenga márgenes que lo descentren */
+            .language-selector-container {{
+                /* Contenedor para el selector de idioma */
+                min-width: 120px; /* Asegura que no se comprima demasiado */
+                text-align: right;
+            }}
         </style>
     </head>
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
         <div class="w-full max-w-2xl card p-6 md:p-10 mt-6">
             
-            <div class="title-container">
-                <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
-                <h1 class="text-3xl font-extrabold text-gray-800 text-center">{t['titulo']}</h1>
-            </div>
-            
-            <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
-
-            <form method="POST" action="/" class="space-y-4">
-                
-                <div class="flex justify-end mb-4">
+            <div class="header-content">
+                <div class="title-group">
+                    <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                    <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
+                </div>
+                <div class="language-selector-container">
                     <label for="idioma" class="sr-only">{t['cambiar_idioma']}</label>
                     <select id="idioma" name="idioma" class="p-2 border border-gray-300 rounded-lg text-sm" onchange="this.form.submit()">
                         <option value="Español" {"selected" if idioma == 'Español' else ""}>Español</option>
                         <option value="English" {"selected" if idioma == 'English' else ""}>English</option>
                     </select>
                 </div>
+            </div>
+            
+            <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
+
+            <form method="POST" action="/" class="space-y-4">
                 
                 <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['cliente_datos']}</h2>
                 <div class="bg-gray-100 p-4 rounded-lg space-y-4 mb-6">
@@ -614,8 +643,25 @@ def catalogo():
             .card.selected-cab {{ border: 3px solid #3B82F6; }} /* Azul */
             .card.selected-both {{ border: 3px solid #10B981; }} /* Verde */
             .selection-status {{ font-size: 0.75rem; font-weight: 600; margin-top: 4px; }}
-            .title-container {{ display: flex; justify-content: center; align-items: center; margin-bottom: 1rem; }}
-            .logo-img {{ height: 40px; margin-right: 10px; }} /* Asegúrate de que esta clase exista en el CSS del catálogo */
+            /* Estilos para el contenedor del título y logo en el catálogo */
+            .title-container {{ 
+                display: flex; 
+                align-items: center; 
+                justify-content: center; /* Centra el grupo de logo y título */
+                margin-bottom: 1rem;
+                position: relative; /* Para el posicionamiento del logo */
+                width: 100%; /* Asegura que ocupe todo el ancho disponible */
+            }}
+            .logo-img {{ 
+                height: 60px; /* Logo más grande */
+                position: absolute; 
+                left: 0; /* Empuja el logo a la izquierda dentro del contenedor */
+            }}
+            /* Ajuste para pantallas pequeñas si el logo es muy grande */
+            @media (max-width: 640px) {{
+                .logo-img {{ height: 40px; }}
+            }}
+            h1 {{ margin: 0; }} /* Eliminar márgenes del h1 para un centrado preciso */
         </style>
     </head>
     <body class="p-4 md:p-8">
