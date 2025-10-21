@@ -3,7 +3,6 @@ import os
 import pandas as pd
 from flask import Flask, request, render_template_string, session, redirect, url_for
 import logging
-import re
 import math
 from typing import Tuple, List
 
@@ -31,7 +30,6 @@ def obtener_precio_oro() -> Tuple[float, str]:
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    # Usar una API Key de prueba o real si se tiene
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -131,7 +129,6 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional en los DataFrames."""
     
-    # Manejo de casos donde no hay selección o datos
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0 
         
@@ -228,7 +225,7 @@ def formulario():
     
     # --- 3. Obtener/Establecer Datos del Cliente y Anillos ---
     
-    # 3.1. Obtener valores iniciales/actuales de la sesión (BASE PARA TODO EL PROCESO)
+    # 3.1. Obtener valores iniciales/actuales de la sesión (BASE)
     nombre_cliente = session.get("nombre_cliente", "") 
     email_cliente = session.get("email_cliente", "")   
     
@@ -244,8 +241,23 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
+    # ⚠️ CORRECCIÓN DE RESETEO DE ANCHO/TALLA AL VOLVER DEL CATÁLOGO
+    if fresh_selection:
+        # GET al regresar del catálogo: Resetea Ancho/Talla en las variables y en la sesión inmediatamente.
+        ancho_dama = ""
+        talla_dama = ""
+        ancho_cab = ""
+        talla_cab = ""
+        
+        session["ancho_dama"] = ancho_dama
+        session["talla_dama"] = talla_dama
+        session["ancho_cab"] = ancho_cab
+        session["talla_cab"] = talla_cab
+        # El código continúa para recalcular o pre-seleccionar los nuevos defaults.
+
+    
     if request.method == "POST":
-        # POST: TOMA del formulario y SOBREESCRIBE las variables y la sesión
+        # POST: TOMA del formulario (incluyendo cliente y los selects de anillo)
         nombre_cliente = request.form.get("nombre_cliente", "")
         email_cliente = request.form.get("email_cliente", "")
         
@@ -261,19 +273,6 @@ def formulario():
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
         
-    elif fresh_selection:
-        # GET al regresar del catálogo:
-        # ⚠️ CORRECCIÓN: Resetea Ancho/Talla en las variables y en la sesión inmediatamente.
-        ancho_dama = ""
-        talla_dama = ""
-        ancho_cab = ""
-        talla_cab = ""
-        
-        session["ancho_dama"] = ancho_dama
-        session["talla_dama"] = talla_dama
-        session["ancho_cab"] = ancho_cab
-        session["talla_cab"] = talla_cab
-
     
     # 4. Guardar las selecciones de anillo en sesión (asegura que POST actualice todo)
     session["kilates_dama"] = kilates_dama
@@ -282,7 +281,6 @@ def formulario():
     session["kilates_cab"] = kilates_cab
     session["ancho_cab"] = ancho_cab
     session["talla_cab"] = talla_cab
-    # Modelo y Metal ya fueron actualizados por el catálogo o se mantienen del default/sesión
     session["modelo_dama"] = modelo_dama
     session["metal_dama"] = metal_dama
     session["modelo_cab"] = modelo_cab
@@ -290,6 +288,9 @@ def formulario():
 
 
     # --- 5. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
+    # Este bloque solo se ejecuta si los campos están vacíos (al resetear el modelo)
+    # y ahora se encuentra **después** del procesamiento de fresh_selection.
+
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
             return [], []
@@ -315,7 +316,8 @@ def formulario():
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
-    # Forzar la selección del primer ancho y talla si el modelo está seleccionado y no hay valor actual
+    # Forzar la selección del primer ancho y talla si el modelo está seleccionado y NO HAY VALOR ACTUAL.
+    # Esto ocurre si venimos del catálogo o si cambiamos Kilates/etc. con los campos vacíos.
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
@@ -329,7 +331,7 @@ def formulario():
             ancho_cab = anchos_c[0]
             session["ancho_cab"] = ancho_cab 
         if not talla_cab and tallas_c:
-            talla_cab = tallas_c[0]
+            talla_cab = tallas_cab[0]
             session["talla_cab"] = talla_cab 
 
     # --- 6. Cálculos ---
@@ -543,7 +545,7 @@ def catalogo():
                 modelo, metal = seleccion.split(";")
                 session[f"modelo_{tipo}"] = modelo.strip().upper()
                 session[f"metal_{tipo}"] = metal.strip().upper()
-                # Borrar Ancho y Talla para forzar su nueva selección en el formulario
+                # Borrar Ancho y Talla en la sesión para forzar la pre-selección del nuevo modelo en el formulario
                 session[f"ancho_{tipo}"] = ""
                 session[f"talla_{tipo}"] = ""
                 
