@@ -419,29 +419,28 @@ def formulario():
             .header-content {{ 
                 display: flex; 
                 align-items: center; 
-                justify-content: space-between; 
+                justify-content: space-between; /* Mantiene logo izq, selector der */
                 width: 100%;
                 margin-bottom: 1rem;
             }}
             .title-group {{
                 display: flex;
                 align-items: center;
-                flex-grow: 1; 
-                /* CAMBIO AQUÍ: Eliminado justify-content: center; */
-                position: relative; 
+                flex-grow: 1; /* Ocupa todo el espacio central disponible */
+                /* position: relative;  Eliminamos esto si el logo no usa absolute*/
             }}
             .logo-img {{ 
-                height: 60px; 
-                position: absolute; 
-                left: 0;
+                height: 60px; /* Logo más grande */
+                /* Eliminamos position: absolute; left: 0; para que sea un elemento flex normal */
+                margin-right: 15px; /* Espacio entre el logo y el título */
             }}
             @media (max-width: 640px) {{
                 .logo-img {{ height: 40px; }}
             }}
             h1 {{ 
-                margin: 0; 
-                padding-left: 20px; /* Añade un margen a la izquierda para empujar el título */
-                text-align: left; /* Asegura que el texto se alinee a la izquierda dentro de su espacio */
+                flex-grow: 1; /* Permite que el h1 ocupe el espacio restante dentro de title-group */
+                text-align: center; /* CENTRA EL TEXTO dentro del h1 */
+                margin: 0; /* Elimina márgenes por defecto del h1 */
             }} 
             .language-selector-container {{
                 min-width: 120px; 
@@ -454,8 +453,8 @@ def formulario():
             
             <form method="POST" action="/" class="space-y-4"> 
                 <div class="header-content">
+                    <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                     <div class="title-group">
-                        <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                         <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
                     </div>
                     <div class="language-selector-container">
@@ -635,23 +634,21 @@ def catalogo():
             .title-container {{ 
                 display: flex; 
                 align-items: center; 
-                /* CAMBIO AQUÍ: Eliminado justify-content: center; */
+                justify-content: space-between; /* Mantiene logo izq, espacio central para título */
                 margin-bottom: 1rem;
-                position: relative; 
                 width: 100%;
             }}
             .logo-img {{ 
-                height: 60px; 
-                position: absolute; 
-                left: 0; 
+                height: 60px; /* Logo más grande */
+                margin-right: 15px; /* Espacio entre el logo y el título */
             }}
             @media (max-width: 640px) {{
                 .logo-img {{ height: 40px; }}
             }}
             h1 {{ 
-                margin: 0; 
-                padding-left: 20px; /* Añade un margen a la izquierda para empujar el título */
-                text-align: left; /* Asegura que el texto se alinee a la izquierda dentro de su espacio */
+                flex-grow: 1; /* Permite que el h1 ocupe el espacio restante */
+                text-align: center; /* CENTRA EL TEXTO dentro del h1 */
+                margin: 0; /* Elimina márgenes por defecto del h1 */
             }} 
         </style>
     </head>
@@ -661,6 +658,7 @@ def catalogo():
             <div class="title-container">
                 <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                 <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
+                <div style="width: 60px; margin-left: 15px;"></div> 
             </div>
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
