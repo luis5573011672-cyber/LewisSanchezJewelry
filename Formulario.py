@@ -512,7 +512,7 @@ def formulario():
 
             // 1. Cargar datos de localStorage al cargar la página
             document.addEventListener('DOMContentLoaded', () => {{
-                // Usar {{ y }} para escapar las llaves de JavaScript de la f-string de Python
+                // Se usa {{ y }} para escapar las llaves de JavaScript de la f-string de Python
                 if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
                     nombreInput.value = localStorage.getItem('nombre_cliente');
                 }}
@@ -538,8 +538,9 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    """Ruta del catálogo: selecciona Modelo y Metal."""
-    
+    """Ruta del catálogo: selecciona Modelo y Metal. 
+    Permite múltiples selecciones (Dama y Caballero) antes de regresar al formulario.
+    """
     df, _ = cargar_datos()
     
     mensaje_exito = None
@@ -548,12 +549,12 @@ def catalogo():
         seleccion = request.form.get("seleccion")
         tipo = request.form.get("tipo")
         
-        # Lógica de Retorno al Formulario
+        # Lógica de Retorno al Formulario - Activado por el botón "Volver al Formulario"
         if not seleccion and request.form.get("volver_btn"):
-            # Volver al formulario con fresh_selection=True para resetear Ancho/Talla
+            # Redirige con fresh_selection=True para forzar el reseteo de Ancho/Talla en /
             return redirect(url_for("formulario", fresh_selection=True))
         
-        # Lógica de Selección de Anillo
+        # Lógica de Selección de Anillo - Activado por botones "Seleccionar Dama/Caballero"
         if seleccion and tipo:
             try:
                 modelo, metal = seleccion.split(";")
