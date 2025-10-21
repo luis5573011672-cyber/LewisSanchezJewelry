@@ -35,6 +35,11 @@ def obtener_precio_oro() -> Tuple[float, str]:
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
     
     try:
+        # Usa una clave de prueba si no tienes una activa
+        if not API_KEY or API_KEY == "goldapi-4g9e8p719mgvhodho-io":
+             logging.warning("Usando clave de API de prueba o no válida. Usando precio por defecto.")
+             return DEFAULT_GOLD_PRICE, "fallback (API key issue)"
+
         response = requests.get(url, headers=headers, timeout=5)
         response.raise_for_status()
         data = response.json()
@@ -169,15 +174,11 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    # --- Lógica de Reinicio de Sesión para Inicio Limpio ---
-    if request.method == "GET" and request.args.get("reset_session") == "True":
-        # Esta es la redirección de inicio (borrado forzado)
-        logging.info("Reinicio de Sesión Forzado: Limpiando datos de cliente y selección.")
-        # Limpiamos solo los datos relevantes para mantener otras cosas como el idioma si fuera necesario.
-        for key in list(session.keys()):
-            if key not in ['idioma']: # Mantenemos el idioma
-                 del session[key]
-        # Redirigimos sin el parámetro para evitar un bucle
+    # --- 0. Manejo de Limpieza Forzada (Accedido por /?clear=True) ---
+    if request.method == "GET" and request.args.get("clear") == "True":
+        logging.info("Limpieza Forzada de Sesión.")
+        session.clear()
+        # El idioma se reestablecerá a Español por defecto en la carga
         return redirect(url_for("formulario"))
     
     # --- Carga de Datos ---
@@ -205,10 +206,11 @@ def formulario():
         "cliente_datos": "Datos del Cliente" if es else "Client Details",
         "nombre": "Nombre del Cliente" if es else "Client Name",
         "email": "Email de Contacto" if es else "Contact Email",
-        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
+        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language",
+        "nueva_sesion": "Iniciar Nueva Sesión" if es else "Start New Session"
     }
 
-    # Cargar datos del cliente: Siempre leemos de la sesión (después de la posible limpieza)
+    # Cargar datos del cliente: Leemos de la sesión.
     nombre_cliente = session.get("nombre_cliente", "") 
     email_cliente = session.get("email_cliente", "") 
 
@@ -225,14 +227,13 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # ⚠️ Lógica para forzar la primera carga LIMPIA
-    is_initial_get = request.method == "GET" and not request.args.get("fresh_selection")
-    if is_initial_get and session.get("modelo_dama") is None:
-        # Esto ocurre cuando no hay sesión activa O si se acaba de limpiar la sesión.
-        # Inicializamos los valores por defecto (vacíos o base)
-        session["modelo_dama"] = t['seleccionar'].upper()
+    # ⚠️ Inicialización Lógica (Si no hay sesión activa/valores)
+    # Establece valores por defecto si no existen en la sesión (que es lo que pasa tras session.clear())
+    if modelo_dama == t['seleccionar'].upper() and session.get("kilates_dama") is None:
+        logging.info("Inicializando valores de anillo por defecto (Sesión Vacía).")
+        session["modelo_dama"] = modelo_dama
         session["metal_dama"] = ""
-        session["modelo_cab"] = t['seleccionar'].upper()
+        session["modelo_cab"] = modelo_cab
         session["metal_cab"] = ""
         session["kilates_dama"] = "14"
         session["kilates_cab"] = "14"
@@ -246,7 +247,6 @@ def formulario():
     if request.method == "POST":
         
         # 2.1. Guardar SIEMPRE los datos del cliente que vinieron en el POST
-        # Esto asegura que si el usuario llenó los campos y luego interactuó (ej. cambió kilates), los datos persisten.
         nombre_cliente = request.form.get("nombre_cliente", nombre_cliente)
         email_cliente = request.form.get("email_cliente", email_cliente)
         session["nombre_cliente"] = nombre_cliente 
@@ -265,7 +265,7 @@ def formulario():
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
         
-        # Aseguramos que el modelo/metal se mantenga leyendo de la sesión
+        # Aseguramos que el modelo/metal se mantenga leyendo de la sesión (ya se cargaron al inicio de la función)
         modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
         metal_dama = session.get("metal_dama", "").upper()
         modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
@@ -282,7 +282,6 @@ def formulario():
         talla_cab = ""
 
     # 4. Guardar los valores de anillo actuales/actualizados en sesión
-    # Esto es crucial para mantener la persistencia si se usó un POST (ej. cambio de kilataje)
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -478,7 +477,11 @@ def formulario():
                         <input type="email" id="email_cliente" name="email_cliente" value="{email_cliente}"
                                class="w-full p-2 border border-gray-300 rounded-lg">
                     </div>
+                    <a href="{url_for('formulario', clear=True)}" class="inline-block px-4 py-2 text-red-700 border border-red-500 rounded-lg text-sm font-semibold hover:bg-red-50 transition duration-150">
+                        {t['nueva_sesion']}
+                    </a>
                 </div>
+
                 <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
                 <div class="bg-pink-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
@@ -526,7 +529,10 @@ def formulario():
 
             // 1. Cargar datos de localStorage al cargar la página
             document.addEventListener('DOMContentLoaded', () => {{
-                // Esta lógica mantiene la persistencia de los datos del cliente con localStorage
+                // Si la sesión de Flask NO tiene un valor (porque está en blanco), 
+                // entonces intenta usar localStorage como último recurso.
+                // Si Flask Session SÍ tiene valor (por un POST o regreso de catálogo), 
+                // se respeta el valor de Flask Session.
                 if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
                     nombreInput.value = localStorage.getItem('nombre_cliente');
                 }}
@@ -543,23 +549,7 @@ def formulario():
                 localStorage.setItem('email_cliente', e.target.value);
             }});
         </script>
-        
-        <script>
-            // Verifica si es la primera vez que se carga la página (no por POST o regreso de catálogo)
-            // Y si no hay un flag de reseteo, fuerza el reseteo de sesión.
-            if (window.performance && performance.navigation.type === performance.navigation.TYPE_NAVIGATE && 
-                !window.location.search.includes('fresh_selection') && 
-                !window.location.search.includes('reset_session')) {{
-                // Borra también el localStorage en el primer acceso para un inicio totalmente limpio
-                localStorage.removeItem('nombre_cliente');
-                localStorage.removeItem('email_cliente');
-
-                // Redirige para limpiar la sesión de Flask
-                window.location.href = window.location.pathname + '?reset_session=True';
-            }}
-        </script>
-
-    </body>
+        </body>
     </html>
     """
     return render_template_string(html_form)
@@ -750,7 +740,6 @@ def catalogo():
                         <p class="text-md font-semibold text-indigo-700 mb-2">{t['metal']}: {metal}</p>
                         <p class="selection-status text-green-600">{status_text}</p>
 
-                        <div class="mt-2 space-y-3 w-full border-t pt-3">
                             <form method="POST" action="{url_for('catalogo')}" class="inline-block w-full">
                                 <input type="hidden" name="seleccion" value="{valor_seleccion}">
                                 <button type="submit" name="tipo" value="dama"
