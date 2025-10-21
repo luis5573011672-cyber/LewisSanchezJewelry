@@ -169,6 +169,18 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
+    # --- Lógica de Reinicio de Sesión para Inicio Limpio ---
+    if request.method == "GET" and request.args.get("reset_session") == "True":
+        # Esta es la redirección de inicio (borrado forzado)
+        logging.info("Reinicio de Sesión Forzado: Limpiando datos de cliente y selección.")
+        # Limpiamos solo los datos relevantes para mantener otras cosas como el idioma si fuera necesario.
+        for key in list(session.keys()):
+            if key not in ['idioma']: # Mantenemos el idioma
+                 del session[key]
+        # Redirigimos sin el parámetro para evitar un bucle
+        return redirect(url_for("formulario"))
+    
+    # --- Carga de Datos ---
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
@@ -196,7 +208,7 @@ def formulario():
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
 
-    # Cargar datos del cliente: Siempre leemos de la sesión.
+    # Cargar datos del cliente: Siempre leemos de la sesión (después de la posible limpieza)
     nombre_cliente = session.get("nombre_cliente", "") 
     email_cliente = session.get("email_cliente", "") 
 
@@ -213,11 +225,11 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # ⚠️ MANEJO DE INICIO FRESCO O RESETEO COMPLETO
-    is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
-    if is_root_get and session.get("modelo_dama") is None:
-        logging.info("Inicio fresco: Inicializando valores de anillo por defecto.")
-        # Los datos de nombre/email se mantienen si existen. Solo inicializamos las selecciones.
+    # ⚠️ Lógica para forzar la primera carga LIMPIA
+    is_initial_get = request.method == "GET" and not request.args.get("fresh_selection")
+    if is_initial_get and session.get("modelo_dama") is None:
+        # Esto ocurre cuando no hay sesión activa O si se acaba de limpiar la sesión.
+        # Inicializamos los valores por defecto (vacíos o base)
         session["modelo_dama"] = t['seleccionar'].upper()
         session["metal_dama"] = ""
         session["modelo_cab"] = t['seleccionar'].upper()
@@ -234,6 +246,7 @@ def formulario():
     if request.method == "POST":
         
         # 2.1. Guardar SIEMPRE los datos del cliente que vinieron en el POST
+        # Esto asegura que si el usuario llenó los campos y luego interactuó (ej. cambió kilates), los datos persisten.
         nombre_cliente = request.form.get("nombre_cliente", nombre_cliente)
         email_cliente = request.form.get("email_cliente", email_cliente)
         session["nombre_cliente"] = nombre_cliente 
@@ -269,6 +282,7 @@ def formulario():
         talla_cab = ""
 
     # 4. Guardar los valores de anillo actuales/actualizados en sesión
+    # Esto es crucial para mantener la persistencia si se usó un POST (ej. cambio de kilataje)
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -512,7 +526,7 @@ def formulario():
 
             // 1. Cargar datos de localStorage al cargar la página
             document.addEventListener('DOMContentLoaded', () => {{
-                // Se usa {{ y }} para escapar las llaves de JavaScript de la f-string de Python
+                // Esta lógica mantiene la persistencia de los datos del cliente con localStorage
                 if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
                     nombreInput.value = localStorage.getItem('nombre_cliente');
                 }}
@@ -529,6 +543,22 @@ def formulario():
                 localStorage.setItem('email_cliente', e.target.value);
             }});
         </script>
+        
+        <script>
+            // Verifica si es la primera vez que se carga la página (no por POST o regreso de catálogo)
+            // Y si no hay un flag de reseteo, fuerza el reseteo de sesión.
+            if (window.performance && performance.navigation.type === performance.navigation.TYPE_NAVIGATE && 
+                !window.location.search.includes('fresh_selection') && 
+                !window.location.search.includes('reset_session')) {{
+                // Borra también el localStorage en el primer acceso para un inicio totalmente limpio
+                localStorage.removeItem('nombre_cliente');
+                localStorage.removeItem('email_cliente');
+
+                // Redirige para limpiar la sesión de Flask
+                window.location.href = window.location.pathname + '?reset_session=True';
+            }}
+        </script>
+
     </body>
     </html>
     """
