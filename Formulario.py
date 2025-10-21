@@ -24,7 +24,7 @@ DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 
-# --------------------- FUNCIONES DE UTILIDAD ---------------------
+# --------------------- FUNCIONES DE UTILIDAD (SIN CAMBIOS) ---------------------
 
 def obtener_precio_oro() -> Tuple[float, str]:
     """
@@ -176,9 +176,10 @@ def formulario():
     
     # --- 0. Manejo de Limpieza Forzada (Accedido por /?clear=True) ---
     if request.method == "GET" and request.args.get("clear") == "True":
-        logging.info("Limpieza Forzada de Sesión.")
+        logging.info("Limpieza Forzada de Sesión. Borrando Session y preparando JS para borrar localStorage.")
         session.clear()
-        # El idioma se reestablecerá a Español por defecto en la carga
+        # **Ajuste:** Ya borramos la sesión, ahora redirigimos sin el parámetro 'clear' para que
+        # el formulario se cargue limpio y el JS pueda borrar el localStorage en el cliente.
         return redirect(url_for("formulario"))
     
     # --- Carga de Datos ---
@@ -215,6 +216,7 @@ def formulario():
     email_cliente = session.get("email_cliente", "") 
 
     # Cargar datos del anillo de la SESIÓN (Valores actuales)
+    # **Ajuste:** Utilizamos el operador `.get()` para asignar valores por defecto en caso de que la sesión esté vacía.
     kilates_dama = session.get("kilates_dama", "14")
     ancho_dama = session.get("ancho_dama", "")
     talla_dama = session.get("talla_dama", "")
@@ -226,24 +228,9 @@ def formulario():
     talla_cab = session.get("talla_cab", "")
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
-    
-    # ⚠️ Inicialización Lógica (Si no hay sesión activa/valores)
-    # Establece valores por defecto si no existen en la sesión (que es lo que pasa tras session.clear())
-    if modelo_dama == t['seleccionar'].upper() and session.get("kilates_dama") is None:
-        logging.info("Inicializando valores de anillo por defecto (Sesión Vacía).")
-        session["modelo_dama"] = modelo_dama
-        session["metal_dama"] = ""
-        session["modelo_cab"] = modelo_cab
-        session["metal_cab"] = ""
-        session["kilates_dama"] = "14"
-        session["kilates_cab"] = "14"
-        session["ancho_dama"] = ""
-        session["talla_dama"] = ""
-        session["ancho_cab"] = ""
-        session["talla_cab"] = ""
         
     
-    # --- 2. Manejo de POST (Incluyendo cambio de Kilates) ---
+    # --- 2. Manejo de POST (Incluyendo cambio de Kilates, Ancho y Talla) ---
     if request.method == "POST":
         
         # 2.1. Guardar SIEMPRE los datos del cliente que vinieron en el POST
@@ -257,6 +244,8 @@ def formulario():
               return redirect(url_for("formulario"))
         
         # 2.3. Guardar las selecciones de anillo que vinieron en el POST
+        # **CORRECCIÓN CLAVE:** Aseguramos que los valores del POST (los nuevos) sobreescriban los valores de la sesión
+        # Y luego se asignan a las variables locales para el cálculo inmediato.
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
@@ -265,12 +254,7 @@ def formulario():
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
         
-        # Aseguramos que el modelo/metal se mantenga leyendo de la sesión (ya se cargaron al inicio de la función)
-        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
-        metal_dama = session.get("metal_dama", "").upper()
-        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
-        metal_cab = session.get("metal_cab", "").upper()
-        
+        # Modelo y Metal ya se cargaron desde la sesión y se mantienen.
     
     # --- 3. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
     fresh_selection = request.args.get("fresh_selection")
@@ -282,6 +266,7 @@ def formulario():
         talla_cab = ""
 
     # 4. Guardar los valores de anillo actuales/actualizados en sesión
+    # Esto es crucial para la persistencia entre peticiones (POST o GET con fresh_selection)
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -354,7 +339,6 @@ def formulario():
     
     # URL de la imagen (asumiendo que está en /static/logo.png)
     logo_url = url_for('static', filename='logo.png')
-
 
     # --------------------- Generación del HTML para el Formulario ---------------------
         
@@ -477,7 +461,7 @@ def formulario():
                         <input type="email" id="email_cliente" name="email_cliente" value="{email_cliente}"
                                class="w-full p-2 border border-gray-300 rounded-lg">
                     </div>
-                    <a href="{url_for('formulario', clear=True)}" class="inline-block px-4 py-2 text-red-700 border border-red-500 rounded-lg text-sm font-semibold hover:bg-red-50 transition duration-150">
+                    <a id="clear-session-btn" href="{url_for('formulario', clear=True)}" class="inline-block px-4 py-2 text-red-700 border border-red-500 rounded-lg text-sm font-semibold hover:bg-red-50 transition duration-150">
                         {t['nueva_sesion']}
                     </a>
                 </div>
@@ -527,12 +511,16 @@ def formulario():
             const nombreInput = document.getElementById('nombre_cliente');
             const emailInput = document.getElementById('email_cliente');
 
+            // Lógica para borrar localStorage cuando se inicia una sesión limpia
+            document.getElementById('clear-session-btn').addEventListener('click', () => {{
+                localStorage.removeItem('nombre_cliente');
+                localStorage.removeItem('email_cliente');
+            }});
+
             // 1. Cargar datos de localStorage al cargar la página
             document.addEventListener('DOMContentLoaded', () => {{
                 // Si la sesión de Flask NO tiene un valor (porque está en blanco), 
                 // entonces intenta usar localStorage como último recurso.
-                // Si Flask Session SÍ tiene valor (por un POST o regreso de catálogo), 
-                // se respeta el valor de Flask Session.
                 if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
                     nombreInput.value = localStorage.getItem('nombre_cliente');
                 }}
@@ -549,7 +537,7 @@ def formulario():
                 localStorage.setItem('email_cliente', e.target.value);
             }});
         </script>
-        </body>
+    </body>
     </html>
     """
     return render_template_string(html_form)
@@ -693,14 +681,13 @@ def catalogo():
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
 
-            <form method="POST" action="{url_for('catalogo')}">
-                <div class="mb-8 text-center">
-                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150" name="volver_btn" value="true">
-                        {t['volver']}
-                    </button>
-                </div>
+            <form method="POST" action="{url_for('catalogo')}" class="mb-8 text-center">
+                <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150" name="volver_btn" value="true">
+                    {t['volver']}
+                </button>
+            </form>
                 
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
     """
     
     # Iterar sobre la lista de variantes únicas
@@ -729,7 +716,8 @@ def catalogo():
             status_text = f"✅ {t['caballero']} seleccionado"
 
 
-        # Se usan formularios individuales para asegurar que se envíe el par seleccion/tipo
+        # **CORRECCIÓN CLAVE:** Asegurar que cada tarjeta de selección esté dentro de su propio `<div>`
+        # y que los formularios anidados se **cierren** correctamente.
         html_catalogo += f"""
                     <div class="{card_class} p-4 flex flex-col items-center text-center">
                         <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
@@ -740,6 +728,7 @@ def catalogo():
                         <p class="text-md font-semibold text-indigo-700 mb-2">{t['metal']}: {metal}</p>
                         <p class="selection-status text-green-600">{status_text}</p>
 
+                        <div class="mt-2 space-y-3 w-full border-t pt-3">
                             <form method="POST" action="{url_for('catalogo')}" class="inline-block w-full">
                                 <input type="hidden" name="seleccion" value="{valor_seleccion}">
                                 <button type="submit" name="tipo" value="dama"
@@ -761,7 +750,6 @@ def catalogo():
 
     html_catalogo += """
                 </div>
-            </form>
         </div>
     </body>
     </html>
