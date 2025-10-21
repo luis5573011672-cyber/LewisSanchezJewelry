@@ -5,6 +5,7 @@ from flask import Flask, request, render_template_string, session, redirect, url
 import logging
 import re
 import math
+from typing import Tuple, List
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO)
@@ -33,32 +34,33 @@ def obtener_precio_oro():
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
     
     try:
+        if not API_KEY or API_KEY == "goldapi-4g9e8p719mgvhodho-io":
+             return DEFAULT_GOLD_PRICE, "fallback"
+             
         response = requests.get(url, headers=headers, timeout=5)
         response.raise_for_status()
         data = response.json()
         price = data.get("price")
         
         if price is not None and not math.isnan(price):
-            logging.info(f"Precio del Oro: ${price:,.2f} (LIVE)")
-            return price, "live"
+            return float(price), "live"
             
-        logging.warning("API respondió OK (200), pero faltaba o era inválido el precio. Usando fallback.")
         return DEFAULT_GOLD_PRICE, "fallback"
         
     except (requests.exceptions.RequestException, Exception) as e:
         logging.error(f"Error al obtener precio del oro: {e}. Usando fallback ({DEFAULT_GOLD_PRICE}).")
         return DEFAULT_GOLD_PRICE, "fallback"
 
-def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
+def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
     """Calcula el valor del oro y el monto total de la joya."""
-    if valor_onza is None or valor_onza == 0 or peso_gramos is None or peso_gramos == 0:
-        return 0, 0
+    if valor_onza is None or valor_onza <= 0 or peso_gramos is None or peso_gramos <= 0 or pureza_factor <= 0:
+        return 0.0, 0.0
     
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
     monto_total = valor_gramo * peso_gramos
     return valor_gramo, monto_total
 
-def cargar_datos():
+def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Carga los DataFrames con las correcciones de nombres de columna.
     """
@@ -73,7 +75,6 @@ def cargar_datos():
         df = df_raw.iloc[2:].copy()
         df.columns = new_columns_df
         
-        # Renombrar 'WIDTH' a 'ANCHO'
         if 'WIDTH' in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
@@ -94,9 +95,6 @@ def cargar_datos():
         
         df_global = df
         df_adicional_global = df_adicional
-                
-        logging.warning(f"Columnas df (WEDDING BANDS) con ANCHO y GENERO: {df.columns.tolist()}")
-        logging.warning(f"Columnas df_adicional (SIZE): {df_adicional.columns.tolist()}")
         
         return df, df_adicional
         
@@ -105,20 +103,21 @@ def cargar_datos():
         return pd.DataFrame(), pd.DataFrame()
     
 
-def obtener_nombre_archivo_imagen(ruta_completa):
+def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     """Extrae solo el nombre del archivo del path."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        return None
+        return "placeholder.png" # Usar un placeholder si no hay ruta
     
     ruta_limpia = str(ruta_completa).replace('\\', '/')
     nombre_archivo = os.path.basename(ruta_limpia).strip()
     return nombre_archivo.replace('%20', ' ')
 
-def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero, select_text):
+def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional."""
+    global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
-        return 0, 0, 0 
+        return 0.0, 0.0, 0.0 
         
     # 1. Buscar el PESO y COSTO FIJO en df (WEDDING BANDS)
     filtro_base = (df_global["NAME"] == modelo) & \
@@ -126,28 +125,28 @@ def obtener_peso_y_costo(df_adicional_local, modelo, metal, ancho, talla, genero
                   (df_global["METAL"] == metal) & \
                   (df_global["GENERO"] == genero) 
     
-    peso = 0
-    price_cost = 0 # Costo Fijo
+    peso = 0.0
+    price_cost = 0.0 # Costo Fijo
     
     if not df_global.loc[filtro_base].empty:
         base_fila = df_global.loc[filtro_base].iloc[0]
-        peso = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0))
-        price_cost = base_fila.get("PRICE COST", 0) 
-        try: peso = float(peso)
-        except: peso = 0
-        try: price_cost = float(price_cost)
-        except: price_cost = 0
+        peso_raw = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0))
+        price_cost_raw = base_fila.get("PRICE COST", 0) 
+        try: peso = float(peso_raw)
+        except: peso = 0.0
+        try: price_cost = float(price_cost_raw)
+        except: price_cost = 0.0
 
     # 2. Buscar el COSTO ADICIONAL en df_adicional_local (Hoja SIZE)
-    cost_adicional = 0
+    cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns:
         filtro_adicional = (df_adicional_local["SIZE"] == talla) 
         
         if not df_adicional_local.loc[filtro_adicional].empty:
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
-            cost_adicional = adicional_fila.get("ADICIONAL", 0)
-            try: cost_adicional = float(cost_adicional)
-            except: cost_adicional = 0
+            cost_adicional_raw = adicional_fila.get("ADICIONAL", 0)
+            try: cost_adicional = float(cost_adicional_raw)
+            except: cost_adicional = 0.0
 
     return peso, price_cost, cost_adicional
 
@@ -161,7 +160,7 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
 
     monto_total = 0.0
-
+    
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     session["idioma"] = idioma
     es = idioma == "Español"
@@ -179,24 +178,35 @@ def formulario():
         "catalogo_btn": "Abrir Catálogo" if es else "Open Catalog",
         "cliente_datos": "Datos del Cliente" if es else "Client Details",
         "nombre": "Nombre del Cliente" if es else "Client Name",
-        "email": "Email de Contacto" if es else "Contact Email"
+        "email": "Email de Contacto" if es else "Contact Email",
+        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language",
+        "nueva_sesion": "Iniciar Nueva Sesión" if es else "Start New Session" # Nuevo botón
     }
     
     fresh_selection = request.args.get("fresh_selection")
     
-    # --- 1. Obtener/Establecer Datos del Cliente (Persisten) ---
-    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
-    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
-
-    # --- 2. Obtener Selecciones de Anillo ---
-    
+    # --- 1. Inicialización/Limpieza ---
     if request.method == "GET" and not fresh_selection:
-        # Caso 1: GET limpio (navegación directa). ¡Abrir en blanco y limpiar sesión de modelos!
+        # **CORRECCIÓN:** Limpiar todos los datos del cliente y selecciones en GET inicial
+        session.pop("nombre_cliente", None)
+        session.pop("email_cliente", None)
+        session.pop("modelo_dama", None)
+        session.pop("metal_dama", None)
+        session.pop("modelo_cab", None)
+        session.pop("metal_cab", None)
+        session.pop("kilates_dama", None)
+        session.pop("ancho_dama", None)
+        session.pop("talla_dama", None)
+        session.pop("kilates_cab", None)
+        session.pop("ancho_cab", None)
+        session.pop("talla_cab", None)
+
+        nombre_cliente = ""
+        email_cliente = ""
         modelo_dama = t['seleccionar'].upper()
         metal_dama = ""
         modelo_cab = t['seleccionar'].upper()
         metal_cab = ""
-        
         kilates_dama = "14"
         ancho_dama = ""
         talla_dama = ""
@@ -204,20 +214,17 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
         
-        # Limpiar la sesión para garantizar la persistencia del estado limpio
-        for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "kilates_dama", "ancho_dama", "talla_dama", "kilates_cab", "ancho_cab", "talla_cab"]:
-             if key in session:
-                del session[key]
-
     else:
-        # Caso 2: POST (submit, auto-submit) O GET después de /catalogo (fresh_selection=True)
-        # Cargamos los modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
+        # Cargamos modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
+        nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
+        email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
+
         modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
         metal_dama = session.get("metal_dama", "").upper()
         modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
         metal_cab = session.get("metal_cab", "").upper()
         
-        # Los detalles (kilates, ancho, talla) se obtienen de la forma (POST) o de la sesión
+        # Los detalles (kilates, ancho, talla) se obtienen de la forma (POST) o de la sesión (GET)
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
         talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
@@ -226,7 +233,7 @@ def formulario():
         ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
         talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
         
-        # Si venimos del catálogo, reseteamos el ancho/talla para que la lógica de "Forzar selección del primer ancho/talla" se aplique
+        # Si venimos del catálogo, reseteamos el ancho/talla para forzar la autoselección
         if fresh_selection:
             ancho_dama = ""
             talla_dama = ""
@@ -234,12 +241,14 @@ def formulario():
             talla_cab = ""
 
 
+    # --- 2. Manejo de POST (Guardar todo lo que el usuario envió/cambió) ---
     if request.method == "POST":
+        
         # Guardar datos del cliente
         session["nombre_cliente"] = nombre_cliente
         session["email_cliente"] = email_cliente
         
-        # Guardar TODAS las selecciones de anillo (para mantener la persistencia después del POST/Auto-Submit)
+        # Guardar selecciones de anillo (incluye el cambio de Kilates/Ancho/Talla)
         session["kilates_dama"] = kilates_dama
         session["ancho_dama"] = ancho_dama
         session["talla_dama"] = talla_dama
@@ -248,56 +257,73 @@ def formulario():
         session["talla_cab"] = talla_cab
         
         if "idioma" in request.form:
-            return redirect(url_for("formulario"))
-
-    # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
+             return redirect(url_for("formulario"))
+    
+    # --- 3. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
             return [], []
         
         filtro_ancho = (df["NAME"] == modelo)
-        anchos = sorted(df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist()) if "ANCHO" in df.columns else []
-        tallas = sorted(df_adicional["SIZE"].astype(str).str.strip().unique().tolist(), 
-                          key=lambda x: (re.sub(r'\D', '', x), x)) if "SIZE" in df_adicional.columns else []
+        
+        def sort_numeric(value_str):
+            try: return float(value_str)
+            except ValueError: return float('inf') 
+        
+        # **CORRECCIÓN:** Ordenamiento numérico ascendente para Ancho (ej. 3, 5, 7)
+        anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
+        anchos = sorted(anchos_raw, key=sort_numeric)
+        
+        # **CORRECCIÓN:** Ordenamiento numérico ascendente para Tallas (ej. 4, 4.5, 5)
+        tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
+        tallas = sorted(tallas_raw, key=sort_numeric)
+        
         return anchos, tallas
 
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
-    # Forzar la selección del primer ancho y talla si el modelo está seleccionado
+    # Autoselección si el campo está vacío (ej. después de fresh_selection)
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
+            session["ancho_dama"] = ancho_dama 
         if not talla_dama and tallas_d:
             talla_dama = tallas_d[0]
+            session["talla_dama"] = talla_dama 
 
     if modelo_cab != t['seleccionar'].upper():
         if not ancho_cab and anchos_c:
             ancho_cab = anchos_c[0]
+            session["ancho_cab"] = ancho_cab 
         if not talla_cab and tallas_c:
             talla_cab = tallas_c[0]
-
-    # --- Cálculo dama ---
+            session["talla_cab"] = talla_cab 
+            
+    # --- 4. Cálculos ---
     peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
-        _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0), peso_dama)
+        _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0.0), peso_dama)
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama 
         monto_total += monto_dama
 
-    # --- Cálculo caballero ---
     peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
-        _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0), peso_cab)
+        _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0.0), peso_cab)
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
         monto_total += monto_cab
-    # --------------------- Generación del HTML para el Formulario ---------------------
+        
+    # URL de la imagen (asumiendo que está en /static/logo.png)
+    logo_url = url_for('static', filename='logo.png')
     
+    # --------------------- Generación del HTML para el Formulario ---------------------
+        
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # Añadir onchange="this.form.submit()" para recálculo automático
+        # Kilates Selector
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -306,7 +332,7 @@ def formulario():
                 </select>
             </div>
         """
-
+        
         if modelo == t['seleccionar'].upper() or not anchos or not tallas:
             warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo/metal para habilitar Ancho y Talla.</p>'
             if modelo != t['seleccionar'].upper() and (not anchos or not tallas):
@@ -314,20 +340,19 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # Añadir onchange="this.form.submit()" para recálculo automático
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
             <div class="w-full md:w-1/3">
                 <label for="ancho_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['ancho']}</label>
                 <select id="ancho_{tipo}" name="ancho_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
-                    {''.join([f'<option value="{a}" {"selected" if a == ancho_actual else ""}>{a} mm</option>' for a in anchos])}
+                    {''.join([f'<option value="{a}" {"selected" if str(a) == str(ancho_actual) else ""}>{a} mm</option>' for a in anchos])}
                 </select>
             </div>
             <div class="w-full md:w-1/3">
                 <label for="talla_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['talla']}</label>
                 <select id="talla_{tipo}" name="talla_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
-                    {''.join([f'<option value="{s}" {"selected" if s == talla_actual else ""}>{s}</option>' for s in tallas])}
+                    {''.join([f'<option value="{s}" {"selected" if str(s) == str(talla_actual) else ""}>{s}</option>' for s in tallas])}
                 </select>
             </div>
         </div>
@@ -340,7 +365,6 @@ def formulario():
     precio_oro_status = f"Precio Oro Onza: ${precio_onza:,.2f} USD ({status.upper()})"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     
-    # Se añade la sección de Datos del Cliente en el HTML
     html_form = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
@@ -350,18 +374,51 @@ def formulario():
         <title>{t['titulo']}</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
+            /* Diseño para centrar título y alinear logo a la izquierda */
+            .header-content {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 24px;
+            }}
+            .logo-img {{
+                max-height: 50px; /* Ajusta este valor al tamaño deseado del logo */
+                width: auto;
+            }}
+            .title-group {{
+                flex-grow: 1;
+                text-align: center;
+            }}
+            .language-selector-container {{
+                width: 100px; /* Espacio reservado para el selector de idioma */
+                text-align: right;
+            }}
         </style>
     </head>
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
         <div class="w-full max-w-2xl card p-6 md:p-10 mt-6">
-            <h1 class="text-3xl font-extrabold mb-4 text-gray-800 text-center">{t['titulo']}</h1>
-            <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
-
+            
             <form method="POST" action="/" class="space-y-4">
+            
+                <div class="header-content">
+                    <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                    <div class="title-group">
+                        <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
+                    </div>
+                    <div class="language-selector-container">
+                        <label for="idioma" class="sr-only">{t['cambiar_idioma']}</label>
+                        <select id="idioma" name="idioma" class="p-2 border border-gray-300 rounded-lg text-sm" onchange="this.form.submit()">
+                            <option value="Español" {"selected" if idioma == 'Español' else ""}>Español</option>
+                            <option value="English" {"selected" if idioma == 'English' else ""}>English</option>
+                        </select>
+                    </div>
+                </div>
                 
+                <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
+
                 <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['cliente_datos']}</h2>
                 <div class="bg-gray-100 p-4 rounded-lg space-y-4 mb-6">
                     <div>
@@ -375,6 +432,7 @@ def formulario():
                                class="w-full p-2 border border-gray-300 rounded-lg">
                     </div>
                 </div>
+                
                 <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
                 <div class="bg-pink-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
@@ -424,13 +482,16 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    """Ruta del catálogo: selecciona solo Modelo y Metal y vuelve al formulario.
-    Muestra una tarjeta por cada combinación única de Modelo y Metal (con su foto asociada).
-    """
+    """Ruta del catálogo: selecciona solo Modelo y Metal y vuelve al formulario."""
     df, _ = cargar_datos()
     
     # 1. Manejo del POST: Si se selecciona un producto, guardamos y volvemos.
     if request.method == "POST":
+        
+        # **CORRECCIÓN:** Manejo del botón "Volver al Formulario"
+        if request.form.get("volver_btn") == "true":
+            return redirect(url_for("formulario"))
+
         seleccion = request.form.get("seleccion")
         tipo = request.form.get("tipo")
         
@@ -443,17 +504,11 @@ def catalogo():
                 session[f"modelo_{tipo}"] = modelo.strip().upper()
                 session[f"metal_{tipo}"] = metal.strip().upper()
                 
-                # Al seleccionar un nuevo modelo, limpiamos las selecciones de ancho/talla de la sesión 
-                session[f"ancho_{tipo}"] = ""
-                session[f"talla_{tipo}"] = ""
-
                 # Redirigir con un argumento para indicar que es una selección nueva
                 return redirect(url_for("formulario", fresh_selection=True))
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
-        
-        # Si se presiona "Volver al Formulario" sin seleccionar nada, regresamos sin la bandera
-        return redirect(url_for("formulario"))
+                
 
     # 2. Generación del catálogo
     idioma = session.get("idioma", "Español")
@@ -463,27 +518,16 @@ def catalogo():
         "titulo": "Catálogo de Anillos de Boda" if es else "Wedding Ring Catalog",
         "volver": "Volver al Formulario" if es else "Back to Form",
         "dama": "Dama" if es else "Lady",
-        "caballero": "Caballero" if es else "Gentleman", # <<-- CORRECCIÓN APLICADA AQUÍ
+        "caballero": "Caballero" if es else "Gentleman",
         "metal": "Metal" if es else "Metal",
     }
     
+    # --- LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal) ---
     if df.empty:
-         html_catalogo = f"""
-        <!DOCTYPE html>
-        <html><body><div style="text-align: center; padding: 50px;">
-        <h1 style="color: red;">Error de Carga de Datos</h1>
-        <p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p>
-        <p>Asegúrese de que '{EXCEL_PATH}' existe y tiene datos.</p>
-        <a href="{url_for('formulario')}">Volver al Formulario</a>
-        </div></body></html>
-        """
+         html_catalogo = f"""<!DOCTYPE html><html><body><div style="text-align: center; padding: 50px;"><h1 style="color: red;">Error de Carga de Datos</h1><p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p><p>Asegúrese de que '{EXCEL_PATH}' existe y tiene datos.</p><a href="{url_for('formulario')}">Volver al Formulario</a></div></body></html>"""
          return render_template_string(html_catalogo)
 
-
-    # --- LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal) ---
     df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
-    
-    # Obtenemos solo filas únicas de Modelo y Metal
     variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
     
     catalogo_items = []
@@ -498,7 +542,10 @@ def catalogo():
             "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto)
         })
 
-    # --------------------- HTML/JINJA2 para el Catálogo ---------------------
+    # **CORRECCIÓN:** Se eliminan los formularios individuales de selección de dama/caballero en las tarjetas
+    # y se usa un único formulario que envíe la acción con el botón.
+    
+    logo_url = url_for('static', filename='logo.png')
     
     html_catalogo = f"""
     <!DOCTYPE html>
@@ -512,23 +559,30 @@ def catalogo():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }}
+            .title-container {{ display: flex; align-items: center; justify-content: center; margin-bottom: 2rem; }}
+            .logo-img {{ max-height: 50px; width: auto; margin-right: 1.5rem; }}
+            .h1-centered {{ text-align: center; }}
         </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
-            <h1 class="text-3xl font-extrabold mb-8 text-gray-800 text-center">{t['titulo']}</h1>
             
+            <div class="title-container">
+                <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                <h1 class="text-3xl font-extrabold text-gray-800 h1-centered">{t['titulo']}</h1>
+            </div>
+
             <form method="POST" action="{url_for('catalogo')}">
                 <div class="mb-8 text-center">
-                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150">
+                    <button type="submit" name="volver_btn" value="true"
+                            class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150">
                         {t['volver']}
                     </button>
                 </div>
-            
+                
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
     """
     
-    # Iterar sobre la lista de variantes únicas
     for item in catalogo_items:
         modelo = item['modelo']
         metal = item['metal']
@@ -546,15 +600,13 @@ def catalogo():
                         <p class="text-md font-semibold text-indigo-700 mb-4">{t['metal']}: {metal}</p>
 
                         <div class="mt-2 space-y-3 w-full border-t pt-3">
-                            <button type="submit" name="seleccion" value="{valor_seleccion}" 
-                                    class="inline-block w-full px-3 py-1.5 text-white bg-pink-500 rounded text-sm font-semibold hover:bg-pink-600 transition duration-150 text-center mb-1" 
-                                    onclick="document.getElementById('tipo_input').value='dama';">
+                            <button type="submit" name="seleccion" value="{valor_seleccion}" data-tipo="dama"
+                                    class="select-btn inline-block w-full px-3 py-1.5 text-white bg-pink-500 rounded text-sm font-semibold hover:bg-pink-600 transition duration-150 text-center mb-1">
                                 Seleccionar {t['dama']}
                             </button>
                             
-                            <button type="submit" name="seleccion" value="{valor_seleccion}" 
-                                    class="inline-block w-full px-3 py-1.5 text-white bg-blue-500 rounded text-sm font-semibold hover:bg-blue-600 transition duration-150 text-center"
-                                    onclick="document.getElementById('tipo_input').value='cab';">
+                            <button type="submit" name="seleccion" value="{valor_seleccion}" data-tipo="cab"
+                                    class="select-btn inline-block w-full px-3 py-1.5 text-white bg-blue-500 rounded text-sm font-semibold hover:bg-blue-600 transition duration-150 text-center">
                                 Seleccionar {t['caballero']}
                             </button>
                         </div>
@@ -566,6 +618,16 @@ def catalogo():
                 <input type="hidden" id="tipo_input" name="tipo" value="">
             </form>
         </div>
+        <script>
+            // Script para asegurar que el 'tipo' se envíe correctamente al hacer clic en el botón de selección
+            document.querySelectorAll('.select-btn').forEach(button => {
+                button.addEventListener('click', function(event) {
+                    const tipo = this.getAttribute('data-tipo');
+                    document.getElementById('tipo_input').value = tipo;
+                    // El botón ya tiene type="submit", el formulario se enviará
+                });
+            });
+        </script>
     </body>
     </html>
     """
