@@ -56,12 +56,16 @@ def obtener_precio_oro():
         return DEFAULT_GOLD_PRICE, "fallback"
 
 def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
-    """Calcula el valor del oro y el monto total de la joya."""
+    """
+    Calcula el valor del oro y el monto total de la joya.
+    CORRECCIÓN: Se usa 'peso_gramos' en lugar de 'peso_gramo' para solucionar el NameError.
+    """
     if valor_onza is None or valor_onza <= 0 or peso_gramos is None or peso_gramos <= 0 or pureza_factor <= 0:
         return 0.0, 0.0
     
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
-    monto_total = valor_gramo * peso_gramo
+    # CORRECCIÓN DE ERROR AQUÍ
+    monto_total = valor_gramo * peso_gramos 
     return valor_gramo, monto_total
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -188,12 +192,14 @@ def formulario():
         "seleccion_actual": "Selección Actual" if es else "Current Selection"
     }
     
+    # Flag para indicar si hubo una selección nueva en el catálogo
     fresh_selection = request.args.get("fresh_selection")
     
     # --- 1. Inicialización/Limpieza ---
     # Limpiar solo en el GET inicial sin parámetros (inicio de la aplicación)
-    if request.method == "GET" and not fresh_selection and not any(key in session for key in ["nombre_cliente", "modelo_dama", "modelo_cab"]):
-        # Limpiar completamente al inicio
+    is_initial_load = request.method == "GET" and not fresh_selection and not any(key in session for key in ["nombre_cliente", "modelo_dama", "modelo_cab"])
+    
+    if is_initial_load:
         for key in ["nombre_cliente", "email_cliente", "modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "kilates_dama", "ancho_dama", "talla_dama", "kilates_cab", "ancho_cab", "talla_cab"]:
              session.pop(key, None)
 
@@ -211,8 +217,7 @@ def formulario():
         talla_cab = ""
         
     else:
-        # Cargar de la sesión o del formulario (POST)
-        # PERSISTENCIA de datos del cliente
+        # Cargar de la sesión (prioridad si no es el POST de los selectores)
         nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
         email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
@@ -221,18 +226,21 @@ def formulario():
         modelo_cab = session.get("modelo_cab", t['seleccionar'].upper())
         metal_cab = session.get("metal_cab", "").upper()
         
+        # Kilates/Ancho/Talla vienen del formulario si hay POST, o de la sesión si es GET
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
 
-        # Si hay una selección nueva de modelo/metal (fresh_selection) o cambio de kilates, 
-        # reiniciamos Ancho y Talla para forzar la autoselección a los nuevos valores disponibles.
-        if fresh_selection or (request.method == "POST" and ("kilates_dama" in request.form or "kilates_cab" in request.form)):
+        # Si hay cambio de modelo/metal (fresh_selection) o cambio de Kilates, reiniciamos Ancho y Talla para forzar la autoselección
+        is_kilates_change = request.method == "POST" and ("kilates_dama" in request.form or "kilates_cab" in request.form)
+        
+        if fresh_selection or is_kilates_change:
+            # Forzar re-selección automática
             ancho_dama = ""
             talla_dama = ""
             ancho_cab = ""
             talla_cab = ""
         else:
-            # Si no hay cambio de modelo/metal/kilates, cargamos el último valor guardado.
+            # Cargar de la sesión o POST si no hay un evento que fuerce el reinicio
             ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
             talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
             ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
@@ -254,8 +262,8 @@ def formulario():
         session["ancho_cab"] = ancho_cab
         session["talla_cab"] = talla_cab
         
-        # Redirigir para POST a GET solo si se cambió algo que requiere recálculo o recarga
-        if "idioma" in request.form or "kilates_dama" in request.form or "kilates_cab" in request.form or "ancho_dama" in request.form or "ancho_cab" in request.form or "talla_dama" in request.form or "talla_cab" in request.form:
+        # Solo redirigir si se cambió el idioma o los kilates (ya que el Ancho y Talla ahora actualizan por AJAX/Submit Button)
+        if "idioma" in request.form or "kilates_dama" in request.form or "kilates_cab" in request.form:
              return redirect(url_for("formulario"))
 
 
@@ -295,6 +303,12 @@ def formulario():
             if not actual_talla and tallas_disponibles:
                 actual_talla = tallas_disponibles[0]
                 session[session_key_talla] = actual_talla
+        # Asegurarse de que el valor actual esté en la sesión (necesario si viene de POST/Formulario)
+        if actual_ancho:
+            session[session_key_ancho] = actual_ancho
+        if actual_talla:
+            session[session_key_talla] = actual_talla
+
         return actual_ancho, actual_talla
 
     ancho_dama, talla_dama = auto_select_and_save(modelo_dama, ancho_dama, anchos_d, "ancho_dama", talla_dama, tallas_d, "talla_dama")
@@ -322,7 +336,7 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # onchange="this.form.submit()" SOLO en Kilates (Dispara recarga para forzar auto-select de Ancho/Talla)
+        # onchange="this.form.submit()" SOLO en Kilates
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -339,19 +353,20 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # onchange="this.form.submit()" en Ancho y Talla para actualizar cálculos
+        # Se elimina onchange="this.form.submit()" en Ancho y Talla para evitar la recarga de la página.
+        # El cálculo se actualizará al presionar el botón de Guardar.
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
             <div class="w-full md:w-1/3">
                 <label for="ancho_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['ancho']}</label>
-                <select id="ancho_{tipo}" name="ancho_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
+                <select id="ancho_{tipo}" name="ancho_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg">
                     {''.join([f'<option value="{a}" {"selected" if str(a) == str(ancho_actual) else ""}>{a} mm</option>' for a in anchos])}
                 </select>
             </div>
             <div class="w-full md:w-1/3">
                 <label for="talla_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['talla']}</label>
-                <select id="talla_{tipo}" name="talla_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
+                <select id="talla_{tipo}" name="talla_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg">
                     {''.join([f'<option value="{s}" {"selected" if str(s) == str(talla_actual) else ""}>{s}</option>' for s in tallas])}
                 </select>
             </div>
@@ -515,9 +530,8 @@ def catalogo():
         
         # Manejo del botón "Volver al Formulario"
         if request.form.get("volver_btn") == "true":
-            # Si simplemente regresa, vuelve al formulario.
-            # Los datos del cliente se guardaron en la sesión en el formulario principal antes de ir al catálogo.
-            return redirect(url_for("formulario"))
+            # Redirige al formulario principal
+            return redirect(url_for("formulario", fresh_selection=True)) # fresh_selection para forzar autoselección
 
         seleccion = request.form.get("seleccion")
         tipo = request.form.get("tipo")
@@ -529,8 +543,7 @@ def catalogo():
                 session[f"modelo_{tipo}"] = modelo.strip().upper()
                 session[f"metal_{tipo}"] = metal.strip().upper()
                 
-                # NO REDIRIGE AL FORMULARIO. Permanece en el catálogo para hacer la siguiente selección.
-                # Redirige a sí mismo para limpiar el POST y mostrar las etiquetas actualizadas.
+                # NO REDIRIGE AL FORMULARIO. Permanece en el catálogo.
                 return redirect(url_for("catalogo")) 
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
@@ -557,20 +570,21 @@ def catalogo():
     
     # Etiquetas de Selección Actual en el Catálogo
     etiquetas_catalogo = ""
-    # Se muestra si al menos una selección (Dama o Caballero) está en la sesión
-    if modelo_dama or modelo_cab:
+    default_text = "SELECCIONE UNA OPCIÓN DE CATÁLOGO"
+    
+    if modelo_dama != default_text or modelo_cab != default_text:
         etiquetas_catalogo += f"""
         <div class="p-4 rounded-lg bg-indigo-50 mb-6">
             <h2 class="text-xl font-semibold text-gray-700 mb-3">{t['seleccion_actual']}</h2>
             <div class="flex flex-wrap gap-3">
         """
-        if modelo_dama and modelo_dama != "SELECCIONE UNA OPCIÓN DE CATÁLOGO":
+        if modelo_dama and modelo_dama != default_text:
             etiquetas_catalogo += f"""
             <span class="bg-pink-200 text-pink-900 text-sm font-medium px-3 py-1 rounded-full">
                 {t['dama']}: {modelo_dama} ({metal_dama})
             </span>
             """
-        if modelo_cab and modelo_cab != "SELECCIONE UNA OPCIÓN DE CATÁLOGO":
+        if modelo_cab and modelo_cab != default_text:
             etiquetas_catalogo += f"""
             <span class="bg-blue-200 text-blue-900 text-sm font-medium px-3 py-1 rounded-full">
                 {t['caballero']}: {modelo_cab} ({metal_cab})
@@ -637,6 +651,7 @@ def catalogo():
             .back-btn-container {{
                 min-width: 150px; 
                 text-align: right;
+                margin-left: auto; /* Mover el botón a la derecha */
             }}
         </style>
     </head>
