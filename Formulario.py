@@ -21,7 +21,7 @@ DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 
-# --------------------- FUNCIONES DE UTILIDAD ---------------------
+# --------------------- FUNCIONES DE UTILIDAD (SIN CAMBIOS) ---------------------
 
 def obtener_precio_oro():
     """
@@ -181,6 +181,7 @@ def formulario():
 
     # 1. Obtener idioma de la forma o sesión
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
+    
     # Si viene del selector, guardarlo. Si no, usa el de la sesión.
     if request.method == "POST" and "idioma" in request.form:
          session["idioma"] = idioma
@@ -193,7 +194,7 @@ def formulario():
 
     t = {
         # MODIFICACIÓN 1: Cambiar el título en español a "PRESUPUESTO"
-        "titulo": "        PRESUPUESTO" if es else "       ESTIMATE",
+        "titulo": "PRESUPUESTO" if es else "Estimate or Work Order Form",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
         "ancho": "Ancho (mm)" if es else "Width (mm)",
@@ -212,83 +213,78 @@ def formulario():
     fresh_selection = request.args.get("fresh_selection")
     
     # --- 1. Obtener/Establecer Datos del Cliente (Persisten) ---
-    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
-    email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
+    # Nota: Si el POST es solo por el cambio de idioma, los campos deben venir del request.form si se llenaron antes.
+    # Si no, se obtienen de la sesión.
 
-    # --- 2. Obtener Selecciones de Anillo ---
-    
-    if request.method == "GET" and not fresh_selection:
-        # Caso 1: GET limpio (navegación directa). ¡Abrir en blanco y limpiar sesión de modelos!
-        modelo_dama = t['seleccionar'].upper()
-        metal_dama = ""
-        modelo_cab = t['seleccionar'].upper()
-        metal_cab = ""
+    # Obtener valores POST o de Sesión para Cliente y Anillos
+    if request.method == "POST" and "idioma" not in request.form:
+        # POST normal (submit del formulario)
+        nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
+        email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
         
-        kilates_dama = "14"
-        ancho_dama = ""
-        talla_dama = ""
-        kilates_cab = "14"
-        ancho_cab = ""
-        talla_cab = ""
+        kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
+        ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
+        talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
         
-        # Limpiar la sesión para garantizar la persistencia del estado limpio
-        for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "kilates_dama", "ancho_dama", "talla_dama", "kilates_cab", "ancho_cab", "talla_cab"]:
-             if key in session:
-                del session[key]
+        kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
+        ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
+        talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
 
     else:
-        # Caso 2: POST (submit, auto-submit) O GET después de /catalogo (fresh_selection=True)
-        # Cargamos los modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
-        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
-        metal_dama = session.get("metal_dama", "").upper()
-        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
-        metal_cab = session.get("metal_cab", "").upper()
+        # GET, GET con fresh_selection, o POST por cambio de idioma (que redirige aquí como GET)
+        nombre_cliente = session.get("nombre_cliente", "")
+        email_cliente = session.get("email_cliente", "")
         
-        # Los detalles (kilates, ancho, talla) se obtienen de la forma (POST) o de la sesión
-        # Solo actualizamos si es un POST y no estamos re-renderizando por el cambio de idioma
-        if request.method == "POST" and "idioma" not in request.form:
-            kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
-            ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
-            talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
+        kilates_dama = session.get("kilates_dama", "14")
+        ancho_dama = session.get("ancho_dama", "")
+        talla_dama = session.get("talla_dama", "")
+        
+        kilates_cab = session.get("kilates_cab", "14")
+        ancho_cab = session.get("ancho_cab", "")
+        talla_cab = session.get("talla_cab", "")
+        
+        # Lógica de limpieza para GET limpio o fresh_selection
+        if request.method == "GET" and not fresh_selection:
+            # Caso 1: GET limpio (navegación directa). ¡Limpiar sesión de modelos!
+            modelo_dama = t['seleccionar'].upper()
+            metal_dama = ""
+            modelo_cab = t['seleccionar'].upper()
+            metal_cab = ""
             
-            kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
-            ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
-            talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
+            # Limpiar la sesión para garantizar la persistencia del estado limpio
+            for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab"]:
+                 if key in session:
+                    del session[key]
+
         else:
-             # Cargar de la sesión si es GET o si acabamos de cambiar el idioma
-            kilates_dama = session.get("kilates_dama", "14")
-            ancho_dama = session.get("ancho_dama", "")
-            talla_dama = session.get("talla_dama", "")
+            # Caso 2: POST (submit, auto-submit) O GET después de /catalogo (fresh_selection=True)
+            # Cargamos los modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
+            modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
+            metal_dama = session.get("metal_dama", "").upper()
+            modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
+            metal_cab = session.get("metal_cab", "").upper()
             
-            kilates_cab = session.get("kilates_cab", "14")
-            ancho_cab = session.get("ancho_cab", "")
-            talla_cab = session.get("talla_cab", "")
-        
-        # Si venimos del catálogo, reseteamos el ancho/talla para que la lógica de "Forzar selección del primer ancho/talla" se aplique
-        if fresh_selection:
-            ancho_dama = ""
-            talla_dama = ""
-            ancho_cab = ""
-            talla_cab = ""
+            # Si venimos del catálogo, reseteamos el ancho/talla para que la lógica de "Forzar selección del primer ancho/talla" se aplique
+            if fresh_selection:
+                ancho_dama = ""
+                talla_dama = ""
+                ancho_cab = ""
+                talla_cab = ""
 
-
-    if request.method == "POST" and "idioma" not in request.form:
-        # Guardar datos del cliente
-        session["nombre_cliente"] = nombre_cliente
-        session["email_cliente"] = email_cliente
-        
-        # Guardar TODAS las selecciones de anillo (para mantener la persistencia después del POST/Auto-Submit)
-        session["kilates_dama"] = kilates_dama
-        session["ancho_dama"] = ancho_dama
-        session["talla_dama"] = talla_dama
-        session["kilates_cab"] = kilates_cab
-        session["ancho_cab"] = ancho_cab
-        session["talla_cab"] = talla_cab
-        
-        # Si no se maneja el idioma aquí, se asume que solo se quiere guardar el estado
-        # y que el formulario se re-renderizará con los mismos datos (o se redirigirá si es necesario).
-        pass
-
+    
+    # Guardar TODAS las selecciones de anillo y cliente en sesión para persistencia
+    session["nombre_cliente"] = nombre_cliente
+    session["email_cliente"] = email_cliente
+    session["kilates_dama"] = kilates_dama
+    session["ancho_dama"] = ancho_dama
+    session["talla_dama"] = talla_dama
+    session["kilates_cab"] = kilates_cab
+    session["ancho_cab"] = ancho_cab
+    session["talla_cab"] = talla_cab
+    session["modelo_dama"] = modelo_dama
+    session["metal_dama"] = metal_dama
+    session["modelo_cab"] = modelo_cab
+    session["metal_cab"] = metal_cab
 
     # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
@@ -323,14 +319,18 @@ def formulario():
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
+            session["ancho_dama"] = ancho_dama # Guardar por defecto
         if not talla_dama and tallas_d:
             talla_dama = tallas_d[0]
+            session["talla_dama"] = talla_dama # Guardar por defecto
 
     if modelo_cab != t['seleccionar'].upper():
         if not ancho_cab and anchos_c:
             ancho_cab = anchos_c[0]
+            session["ancho_cab"] = ancho_cab # Guardar por defecto
         if not talla_cab and tallas_c:
             talla_cab = tallas_c[0]
+            session["talla_cab"] = talla_cab # Guardar por defecto
 
     # --- Cálculo dama ---
     peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
@@ -415,30 +415,55 @@ def formulario():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
-            .title-container {{ display: flex; justify-content: center; align-items: center; margin-bottom: 1rem; }}
-            .logo-img {{ height: 40px; margin-right: 10px; }} /* Ajusta el tamaño aquí */
+            /* Estilos para el contenedor del título y logo */
+            .header-content {{ 
+                display: flex; 
+                align-items: center; 
+                justify-content: space-between; 
+                width: 100%;
+                margin-bottom: 1rem;
+            }}
+            .title-group {{
+                display: flex;
+                align-items: center;
+                flex-grow: 1; 
+                justify-content: center; 
+                position: relative; 
+            }}
+            .logo-img {{ 
+                height: 60px; /* Logo más grande */
+                position: absolute; 
+                left: 0;
+            }}
+            @media (max-width: 640px) {{
+                .logo-img {{ height: 40px; }}
+            }}
+            h1 {{ margin: 0; }} 
+            .language-selector-container {{
+                min-width: 120px; 
+                text-align: right;
+            }}
         </style>
     </head>
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
         <div class="w-full max-w-2xl card p-6 md:p-10 mt-6">
             
-            <div class="title-container">
-                <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
-                <h1 class="text-3xl font-extrabold text-gray-800 text-center">{t['titulo']}</h1>
-            </div>
-            
-            <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
-
-            <form method="POST" action="/" class="space-y-4">
-                
-                <div class="flex justify-end mb-4">
-                    <label for="idioma" class="sr-only">{t['cambiar_idioma']}</label>
-                    <select id="idioma" name="idioma" class="p-2 border border-gray-300 rounded-lg text-sm" onchange="this.form.submit()">
-                        <option value="Español" {"selected" if idioma == 'Español' else ""}>Español</option>
-                        <option value="English" {"selected" if idioma == 'English' else ""}>English</option>
-                    </select>
+            <form method="POST" action="/" class="space-y-4"> <div class="header-content">
+                    <div class="title-group">
+                        <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                        <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
+                    </div>
+                    <div class="language-selector-container">
+                        <label for="idioma" class="sr-only">{t['cambiar_idioma']}</label>
+                        <select id="idioma" name="idioma" class="p-2 border border-gray-300 rounded-lg text-sm" onchange="this.form.submit()">
+                            <option value="Español" {"selected" if idioma == 'Español' else ""}>Español</option>
+                            <option value="English" {"selected" if idioma == 'English' else ""}>English</option>
+                        </select>
+                    </div>
                 </div>
                 
+                <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
+
                 <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['cliente_datos']}</h2>
                 <div class="bg-gray-100 p-4 rounded-lg space-y-4 mb-6">
                     <div>
@@ -490,8 +515,7 @@ def formulario():
                         {t['guardar']} (Aplicar Cambios y Guardar)
                     </button>
                 </div>
-            </form>
-        </div>
+            </form> </div>
     </body>
     </html>
     """
@@ -506,45 +530,34 @@ def catalogo():
     """
     df, _ = cargar_datos()
     
-    mensaje_exito = None  # Variable para mostrar un mensaje después de la selección
+    mensaje_exito = None
     
-    # 1. Manejo del POST: Si se selecciona un producto, guardamos y permanecemos en el catálogo.
     if request.method == "POST":
         seleccion = request.form.get("seleccion")
         tipo = request.form.get("tipo")
         
-        # --- Lógica de Retorno al Formulario ---
-        # Si no hay 'seleccion' (es decir, se pulsó el botón de Volver), volvemos.
+        # Lógica de Retorno al Formulario
         if not seleccion:
-            # Si se presiona "Volver al Formulario", regresamos con la bandera fresh_selection=True
             return redirect(url_for("formulario", fresh_selection=True))
         
-        # --- Lógica de Selección de Anillo ---
+        # Lógica de Selección de Anillo
         if seleccion and tipo:
             try:
-                # El valor de 'seleccion' es "MODELO;METAL"
                 modelo, metal = seleccion.split(";")
-                
-                # Guardamos los valores en MAYÚSCULAS en la sesión
                 session[f"modelo_{tipo}"] = modelo.strip().upper()
                 session[f"metal_{tipo}"] = metal.strip().upper()
-                
-                # Al seleccionar un nuevo modelo, limpiamos las selecciones de ancho/talla de la sesión 
                 session[f"ancho_{tipo}"] = ""
                 session[f"talla_{tipo}"] = ""
                 
-                # Preparamos el mensaje de éxito para la siguiente renderización del catálogo
                 tipo_display = "Dama" if tipo == "dama" else "Caballero"
                 mensaje_exito = f"✅ ¡Modelo y Metal para {tipo_display} guardado! Seleccione el otro o presione 'Volver al Formulario'."
-                
-                # NO REDIRIGIR AQUÍ. Continuamos para renderizar el catálogo nuevamente.
                 
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
                 mensaje_exito = "❌ Error al procesar la selección."
 
 
-    # 2. Generación del catálogo
+    # Generación del catálogo
     idioma = session.get("idioma", "Español")
     es = idioma == "Español"
     
@@ -562,7 +575,7 @@ def catalogo():
     modelo_cab_actual = session.get("modelo_cab", "")
     metal_cab_actual = session.get("metal_cab", "")
     
-    # URL de la imagen (asumiendo que está en /static/logo.png)
+    # URL de la imagen
     logo_url = url_for('static', filename='logo.png')
     
     if df.empty:
@@ -578,10 +591,8 @@ def catalogo():
          return render_template_string(html_catalogo)
 
 
-    # --- LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal) ---
+    # LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal)
     df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
-    
-    # Obtenemos solo filas únicas de Modelo y Metal
     variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
     
     catalogo_items = []
@@ -596,7 +607,7 @@ def catalogo():
             "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto)
         })
 
-    # --------------------- HTML/JINJA2 para el Catálogo ---------------------
+    # --------------------- HTML/JINJA2 para el Catálogo (CSS y Estructura Corregida) ---------------------
     
     html_catalogo = f"""
     <!DOCTYPE html>
@@ -610,12 +621,28 @@ def catalogo():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); transition: all 0.2s; }}
-            .card.selected-dama {{ border: 3px solid #EC4899; }} /* Rosa */
-            .card.selected-cab {{ border: 3px solid #3B82F6; }} /* Azul */
-            .card.selected-both {{ border: 3px solid #10B981; }} /* Verde */
+            .card.selected-dama {{ border: 3px solid #EC4899; }}
+            .card.selected-cab {{ border: 3px solid #3B82F6; }}
+            .card.selected-both {{ border: 3px solid #10B981; }}
             .selection-status {{ font-size: 0.75rem; font-weight: 600; margin-top: 4px; }}
-            .title-container {{ display: flex; justify-content: center; align-items: center; margin-bottom: 1rem; }}
-            .logo-img {{ height: 40px; margin-right: 10px; }} /* Asegúrate de que esta clase exista en el CSS del catálogo */
+            /* Estilos para el contenedor del título y logo en el catálogo (Ajustados para centrado) */
+            .title-container {{ 
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                margin-bottom: 1rem;
+                position: relative; 
+                width: 100%;
+            }}
+            .logo-img {{ 
+                height: 60px; /* Logo más grande */
+                position: absolute; 
+                left: 0; 
+            }}
+            @media (max-width: 640px) {{
+                .logo-img {{ height: 40px; }}
+            }}
+            h1 {{ margin: 0; }} 
         </style>
     </head>
     <body class="p-4 md:p-8">
@@ -646,7 +673,7 @@ def catalogo():
         ruta_web_foto = url_for('static', filename=nombre_foto) 
         valor_seleccion = f"{modelo};{metal}"
         
-        # --- Lógica de estado de selección para el Card ---
+        # Lógica de estado de selección para el Card
         is_dama = modelo == modelo_dama_actual and metal == metal_dama_actual
         is_cab = modelo == modelo_cab_actual and metal == metal_cab_actual
         card_class = "card"
