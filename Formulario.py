@@ -24,7 +24,7 @@ DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 
-# --------------------- FUNCIONES DE UTILIDAD (SIN CAMBIOS) ---------------------
+# --------------------- FUNCIONES DE UTILIDAD ---------------------
 
 def obtener_precio_oro() -> Tuple[float, str]:
     """
@@ -176,10 +176,9 @@ def formulario():
     
     # --- 0. Manejo de Limpieza Forzada (Accedido por /?clear=True) ---
     if request.method == "GET" and request.args.get("clear") == "True":
-        logging.info("Limpieza Forzada de Sesión. Borrando Session y preparando JS para borrar localStorage.")
+        logging.info("Limpieza Forzada de Sesión. Borrando Session.")
         session.clear()
-        # **Ajuste:** Ya borramos la sesión, ahora redirigimos sin el parámetro 'clear' para que
-        # el formulario se cargue limpio y el JS pueda borrar el localStorage en el cliente.
+        # Redirigimos sin el parámetro 'clear' para que el formulario se cargue limpio.
         return redirect(url_for("formulario"))
     
     # --- Carga de Datos ---
@@ -216,7 +215,6 @@ def formulario():
     email_cliente = session.get("email_cliente", "") 
 
     # Cargar datos del anillo de la SESIÓN (Valores actuales)
-    # **Ajuste:** Utilizamos el operador `.get()` para asignar valores por defecto en caso de que la sesión esté vacía.
     kilates_dama = session.get("kilates_dama", "14")
     ancho_dama = session.get("ancho_dama", "")
     talla_dama = session.get("talla_dama", "")
@@ -244,8 +242,8 @@ def formulario():
               return redirect(url_for("formulario"))
         
         # 2.3. Guardar las selecciones de anillo que vinieron en el POST
-        # **CORRECCIÓN CLAVE:** Aseguramos que los valores del POST (los nuevos) sobreescriban los valores de la sesión
-        # Y luego se asignan a las variables locales para el cálculo inmediato.
+        # CORRECCIÓN CLAVE: El valor de request.form.get() es el NUEVO valor seleccionado, 
+        # y debe tener prioridad. La variable local `kilates_dama` es usada como fallback si no viene nada.
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
@@ -253,8 +251,6 @@ def formulario():
         kilates_cab = request.form.get("kilates_cab", kilates_cab)
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
-        
-        # Modelo y Metal ya se cargaron desde la sesión y se mantienen.
     
     # --- 3. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
     fresh_selection = request.args.get("fresh_selection")
@@ -266,7 +262,6 @@ def formulario():
         talla_cab = ""
 
     # 4. Guardar los valores de anillo actuales/actualizados en sesión
-    # Esto es crucial para la persistencia entre peticiones (POST o GET con fresh_selection)
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -716,8 +711,7 @@ def catalogo():
             status_text = f"✅ {t['caballero']} seleccionado"
 
 
-        # **CORRECCIÓN CLAVE:** Asegurar que cada tarjeta de selección esté dentro de su propio `<div>`
-        # y que los formularios anidados se **cierren** correctamente.
+        # Se usan formularios individuales para asegurar que se envíe el par seleccion/tipo
         html_catalogo += f"""
                     <div class="{card_class} p-4 flex flex-col items-center text-center">
                         <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
