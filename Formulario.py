@@ -22,6 +22,51 @@ df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 
 # --- FUNCIONES DE UTILIDAD (Mantenidas) ---
+# Colócalo en la sección de FUNCIONES DE UTILIDAD
+
+def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Carga los DataFrames con las correcciones de nombres de columna.
+    """
+    global df_global, df_adicional_global
+    if not df_global.empty and not df_adicional_global.empty:
+        return df_global, df_adicional_global
+
+    try:
+        # 1. Cargar la hoja WEDDING BANDS
+        df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
+        new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
+        df = df_raw.iloc[2:].copy()
+        df.columns = new_columns_df
+        
+        if 'WIDTH' in df.columns:
+            df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
+            
+        # 2. Cargar la hoja SIZE
+        df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
+        new_columns_adicional = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
+        df_adicional = df_adicional_raw.iloc[1:].copy()
+        df_adicional.columns = new_columns_adicional
+        
+        # 3. Limpieza de valores clave
+        for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO"]: 
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+            
+        for col in ["SIZE", "ADICIONAL"]: 
+            if col in df_adicional.columns:
+                df_adicional[col] = df_adicional[col].astype(str).str.strip()
+        
+        df_global = df
+        df_adicional_global = df_adicional
+        
+        return df, df_adicional
+        
+    except Exception as e:
+        logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
+        return pd.DataFrame(), pd.DataFrame()
+
+# ... (otras funciones auxiliares como obtener_precio_oro, calcular_valor_gramo, etc.)
 # ... (obtener_precio_oro, calcular_valor_gramo, cargar_datos, obtener_nombre_archivo_imagen, obtener_peso_y_costo) ...
 
 # --------------------- RUTAS FLASK ---------------------
