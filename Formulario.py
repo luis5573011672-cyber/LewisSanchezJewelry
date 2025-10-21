@@ -175,9 +175,8 @@ def formulario():
     
     # --- 1. Cargar traducciones, idioma y datos del cliente (PRIMERO) ---
     
-    # Cargar idioma de la sesión o valor por defecto
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
-    session["idioma"] = idioma # Asegura que el idioma se guarda inmediatamente
+    session["idioma"] = idioma 
     es = idioma == "Español"
 
     t = {
@@ -197,33 +196,7 @@ def formulario():
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
 
-    # ⚠️ MANEJO DE INICIO FRESCO O RESETEO COMPLETO
-    # Si la ruta es la raíz (GET) y no tenemos datos de anillo, forzamos la limpieza de los datos del cliente, si es necesario.
-    is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
-    if is_root_get and session.get("modelo_dama") is None and session.get("modelo_cab") is None:
-        # Esto solo ocurre en el primer inicio de la sesión o si se borró la cookie.
-        # En flujos normales, los datos del cliente se mantendrán.
-        logging.info("Inicio fresco: Limpiando datos de cliente y anillo.")
-        session["nombre_cliente"] = ""
-        session["email_cliente"] = ""
-        session["modelo_dama"] = t['seleccionar'].upper()
-        session["metal_dama"] = ""
-        session["modelo_cab"] = t['seleccionar'].upper()
-        session["metal_cab"] = ""
-        
-        # Resetear Kilates a valor por defecto
-        session["kilates_dama"] = "14"
-        session["kilates_cab"] = "14"
-        session["ancho_dama"] = ""
-        session["talla_dama"] = ""
-        session["ancho_cab"] = ""
-        session["talla_cab"] = ""
-    
-    # Cargar datos del cliente
-    nombre_cliente = session.get("nombre_cliente", "") 
-    email_cliente = session.get("email_cliente", "") 
-
-    # Cargar datos del anillo
+    # Cargar datos del anillo de la SESIÓN (Valores actuales)
     kilates_dama = session.get("kilates_dama", "14")
     ancho_dama = session.get("ancho_dama", "")
     talla_dama = session.get("talla_dama", "")
@@ -236,36 +209,65 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
+    # ⚠️ MANEJO DE INICIO FRESCO O RESETEO COMPLETO
+    is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
+    if is_root_get and session.get("modelo_dama") == None:
+        logging.info("Inicio fresco: Limpiando datos de cliente y anillo.")
+        session["nombre_cliente"] = ""
+        session["email_cliente"] = ""
+        session["modelo_dama"] = t['seleccionar'].upper()
+        session["metal_dama"] = ""
+        session["modelo_cab"] = t['seleccionar'].upper()
+        session["metal_cab"] = ""
+        session["kilates_dama"] = "14"
+        session["kilates_cab"] = "14"
+        session["ancho_dama"] = ""
+        session["talla_dama"] = ""
+        session["ancho_cab"] = ""
+        session["talla_cab"] = ""
+    
+    # Cargar datos del cliente
+    nombre_cliente = session.get("nombre_cliente", "") 
+    email_cliente = session.get("email_cliente", "") 
+
     # --- 2. Manejo de POST (Incluyendo cambio de Kilates) ---
     if request.method == "POST":
         
         # 2.1. Guardar siempre los datos del cliente que vinieron en el POST
-        # Esto asegura que si solo se cambia Kilates, el cliente no se pierda
         nombre_cliente = request.form.get("nombre_cliente", nombre_cliente)
         email_cliente = request.form.get("email_cliente", email_cliente)
         session["nombre_cliente"] = nombre_cliente 
         session["email_cliente"] = email_cliente 
         
-        # 2.2. Manejo del cambio de idioma (redirección)
+        # 2.2. Manejo del cambio de idioma 
         if "idioma" in request.form:
-             # El idioma ya se guardó al principio, solo redirigimos para que se apliquen las traducciones
              return redirect(url_for("formulario"))
         
         # 2.3. Guardar las selecciones de anillo que vinieron en el POST
+        # Usamos request.form.get(..., VALOR_ACTUAL) para asegurar que si solo se cambia un select,
+        # los otros selects mantengan el valor ACTUAL de la sesión (ej. si se envía Kilates, Ancho/Talla permanecen).
+        
+        # Anillo Dama
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
         
+        # Anillo Caballero
         kilates_cab = request.form.get("kilates_cab", kilates_cab)
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
+        
+        # Aseguramos que el modelo/metal se mantenga leyendo de la sesión
+        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
+        metal_dama = session.get("metal_dama", "").upper()
+        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
+        metal_cab = session.get("metal_cab", "").upper()
         
     
     # --- 3. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
     fresh_selection = request.args.get("fresh_selection")
     if fresh_selection:
-        # ⚠️ CORRECCIÓN CLAVE: Solo se resetea Ancho/Talla del anillo para forzar la pre-selección
-        # El resto de datos (cliente, modelo, metal) ya están en la sesión y no se tocan.
+        # Se vacían Ancho/Talla para forzar la autoselección con el nuevo modelo/metal
         ancho_dama = ""
         talla_dama = ""
         ancho_cab = ""
@@ -309,6 +311,7 @@ def formulario():
     anchos_c, tallas_c = get_options(modelo_cab)
 
     # Autoselección si el campo está vacío (ej. después de fresh_selection o cambio de modelo)
+    # Se debe re-asignar a la variable local y a la sesión
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
