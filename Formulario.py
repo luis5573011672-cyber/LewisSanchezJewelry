@@ -179,12 +179,21 @@ def formulario():
 
     monto_total_bruto = 0.0
 
+    # 1. Obtener idioma de la forma o sesión
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
-    session["idioma"] = idioma
+    # Si viene del selector, guardarlo. Si no, usa el de la sesión.
+    if request.method == "POST" and "idioma" in request.form:
+         session["idioma"] = idioma
+         # Redirigir para que el cambio de idioma surta efecto en todo el formulario
+         return redirect(url_for("formulario"))
+    else:
+        session["idioma"] = idioma
+
     es = idioma == "Español"
 
     t = {
-        "titulo": "Formulario de Presupuesto u Orden" if es else "Estimate or Work Order Form",
+        # MODIFICACIÓN 1: Cambiar el título en español a "PRESUPUESTO"
+        "titulo": "PRESUPUESTO" if es else "ESTIMATE",
         "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
         "kilates": "Kilates (Carat)",
         "ancho": "Ancho (mm)" if es else "Width (mm)",
@@ -196,7 +205,8 @@ def formulario():
         "catalogo_btn": "Abrir Catálogo" if es else "Open Catalog",
         "cliente_datos": "Datos del Cliente" if es else "Client Details",
         "nombre": "Nombre del Cliente" if es else "Client Name",
-        "email": "Email de Contacto" if es else "Contact Email"
+        "email": "Email de Contacto" if es else "Contact Email",
+        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
     
     fresh_selection = request.args.get("fresh_selection")
@@ -235,13 +245,24 @@ def formulario():
         metal_cab = session.get("metal_cab", "").upper()
         
         # Los detalles (kilates, ancho, talla) se obtienen de la forma (POST) o de la sesión
-        kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
-        ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
-        talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
-        
-        kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
-        ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
-        talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
+        # Solo actualizamos si es un POST y no estamos re-renderizando por el cambio de idioma
+        if request.method == "POST" and "idioma" not in request.form:
+            kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
+            ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
+            talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
+            
+            kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
+            ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
+            talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
+        else:
+             # Cargar de la sesión si es GET o si acabamos de cambiar el idioma
+            kilates_dama = session.get("kilates_dama", "14")
+            ancho_dama = session.get("ancho_dama", "")
+            talla_dama = session.get("talla_dama", "")
+            
+            kilates_cab = session.get("kilates_cab", "14")
+            ancho_cab = session.get("ancho_cab", "")
+            talla_cab = session.get("talla_cab", "")
         
         # Si venimos del catálogo, reseteamos el ancho/talla para que la lógica de "Forzar selección del primer ancho/talla" se aplique
         if fresh_selection:
@@ -251,7 +272,7 @@ def formulario():
             talla_cab = ""
 
 
-    if request.method == "POST":
+    if request.method == "POST" and "idioma" not in request.form:
         # Guardar datos del cliente
         session["nombre_cliente"] = nombre_cliente
         session["email_cliente"] = email_cliente
@@ -264,8 +285,10 @@ def formulario():
         session["ancho_cab"] = ancho_cab
         session["talla_cab"] = talla_cab
         
-        if "idioma" in request.form:
-            return redirect(url_for("formulario"))
+        # Si no se maneja el idioma aquí, se asume que solo se quiere guardar el estado
+        # y que el formulario se re-renderizará con los mismos datos (o se redirigirá si es necesario).
+        pass
+
 
     # --- Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
@@ -408,6 +431,14 @@ def formulario():
 
             <form method="POST" action="/" class="space-y-4">
                 
+                <div class="flex justify-end mb-4">
+                    <label for="idioma" class="sr-only">{t['cambiar_idioma']}</label>
+                    <select id="idioma" name="idioma" class="p-2 border border-gray-300 rounded-lg text-sm" onchange="this.form.submit()">
+                        <option value="Español" {"selected" if idioma == 'Español' else ""}>Español</option>
+                        <option value="English" {"selected" if idioma == 'English' else ""}>English</option>
+                    </select>
+                </div>
+                
                 <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['cliente_datos']}</h2>
                 <div class="bg-gray-100 p-4 rounded-lg space-y-4 mb-6">
                     <div>
@@ -531,6 +562,9 @@ def catalogo():
     modelo_cab_actual = session.get("modelo_cab", "")
     metal_cab_actual = session.get("metal_cab", "")
     
+    # URL de la imagen (asumiendo que está en /static/logo.png)
+    logo_url = url_for('static', filename='logo.png')
+    
     if df.empty:
          html_catalogo = f"""
         <!DOCTYPE html>
@@ -580,11 +614,17 @@ def catalogo():
             .card.selected-cab {{ border: 3px solid #3B82F6; }} /* Azul */
             .card.selected-both {{ border: 3px solid #10B981; }} /* Verde */
             .selection-status {{ font-size: 0.75rem; font-weight: 600; margin-top: 4px; }}
+            .title-container {{ display: flex; justify-content: center; align-items: center; margin-bottom: 1rem; }}
+            .logo-img {{ height: 40px; margin-right: 10px; }} /* Asegúrate de que esta clase exista en el CSS del catálogo */
         </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
-            <h1 class="text-3xl font-extrabold mb-4 text-gray-800 text-center">{t['titulo']}</h1>
+            
+            <div class="title-container">
+                <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                <h1 class="text-3xl font-extrabold text-gray-800 text-center">{t['titulo']}</h1>
+            </div>
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
 
