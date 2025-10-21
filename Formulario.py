@@ -12,9 +12,11 @@ logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing")
+# ¡IMPORTANTE! Cambia esto por una clave fuerte en producción.
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
-EXCEL_PATH = "Formulario Catalogo.xlsm"
+# Asegúrate de que esta ruta es correcta
+EXCEL_PATH = "Formulario Catalogo.xlsm" 
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 
@@ -29,7 +31,8 @@ def obtener_precio_oro():
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
-    API_KEY = "goldapi-4g9e8p719mgvhodho-io"
+    # Usa tu propia API Key si tienes una.
+    API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
     
@@ -188,8 +191,8 @@ def formulario():
     fresh_selection = request.args.get("fresh_selection")
     
     # --- 1. Inicialización/Limpieza ---
-    if request.method == "GET" and not fresh_selection:
-        # Limpiar datos del cliente y selecciones en GET inicial
+    # Limpiar solo en el GET inicial sin parámetros (inicio de la aplicación)
+    if request.method == "GET" and not fresh_selection and not any(key in session for key in ["nombre_cliente", "modelo_dama", "modelo_cab"]):
         for key in ["nombre_cliente", "email_cliente", "modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "kilates_dama", "ancho_dama", "talla_dama", "kilates_cab", "ancho_cab", "talla_cab"]:
              session.pop(key, None)
 
@@ -211,25 +214,26 @@ def formulario():
         nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", ""))
         email_cliente = request.form.get("email_cliente", session.get("email_cliente", ""))
 
-        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
+        modelo_dama = session.get("modelo_dama", t['seleccionar'].upper())
         metal_dama = session.get("metal_dama", "").upper()
-        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
+        modelo_cab = session.get("modelo_cab", t['seleccionar'].upper())
         metal_cab = session.get("metal_cab", "").upper()
         
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
-        ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
-        talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
-        
         kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
-        ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
-        talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
-        
-        # Si venimos del catálogo, reseteamos el ancho/talla para forzar la autoselección
-        if fresh_selection:
+
+        # Si se cambia de modelo/metal (fresh_selection) o kilates, reiniciamos Ancho y Talla para forzar la autoselección
+        if fresh_selection or (request.method == "POST" and ("kilates_dama" in request.form or "kilates_cab" in request.form)):
             ancho_dama = ""
             talla_dama = ""
             ancho_cab = ""
             talla_cab = ""
+        else:
+            # Si no hay cambio de modelo/metal/kilates, cargamos el último valor guardado.
+            ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
+            talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
+            ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
+            talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
 
 
     # --- 2. Manejo de POST (Guardar todo lo que el usuario envió/cambió) ---
@@ -239,7 +243,7 @@ def formulario():
         session["nombre_cliente"] = nombre_cliente
         session["email_cliente"] = email_cliente
         
-        # Guardar selecciones de anillo (incluye el cambio de Kilates/Ancho/Talla)
+        # Guardar selecciones de anillo 
         session["kilates_dama"] = kilates_dama
         session["ancho_dama"] = ancho_dama
         session["talla_dama"] = talla_dama
@@ -247,8 +251,9 @@ def formulario():
         session["ancho_cab"] = ancho_cab
         session["talla_cab"] = talla_cab
         
+        # Redirigir para POST a GET solo si se cambió algo que requiere recálculo o recarga
         if "idioma" in request.form or "kilates_dama" in request.form or "kilates_cab" in request.form or "ancho_dama" in request.form or "ancho_cab" in request.form or "talla_dama" in request.form or "talla_cab" in request.form:
-             # Redirigir para GET (limpiar el POST y reflejar los cambios)
+             # Se redirige sin fresh_selection para que use los valores guardados
              return redirect(url_for("formulario"))
 
 
@@ -315,7 +320,7 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # onchange="this.form.submit()" SOLO en Kilates
+        # onchange="this.form.submit()" SOLO en Kilates (Dispara recarga para forzar auto-select de Ancho/Talla)
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -360,6 +365,7 @@ def formulario():
     
     # --- 6. Etiquetas de Selección Actual ---
     etiquetas_html = ""
+    # Se muestra si al menos una selección (Dama o Caballero) NO es el texto por defecto
     if modelo_dama != t['seleccionar'].upper() or modelo_cab != t['seleccionar'].upper():
         etiquetas_html += f"""
         <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['seleccion_actual']}</h2>
@@ -507,7 +513,7 @@ def catalogo():
         
         # Manejo del botón "Volver al Formulario"
         if request.form.get("volver_btn") == "true":
-            # Si simplemente regresa, no hay nueva selección
+            # Si simplemente regresa, no hay nueva selección de anillo, solo vuelve al formulario
             return redirect(url_for("formulario"))
 
         seleccion = request.form.get("seleccion")
@@ -573,7 +579,7 @@ def catalogo():
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); }}
             
-            /* Ajustes para el Catálogo */
+            /* Ajustes para el Catálogo (Logo más grande y a la izquierda) */
             .header-container {{
                 display: flex;
                 align-items: center;
@@ -593,7 +599,7 @@ def catalogo():
                 margin: 0;
             }}
             .back-btn-container {{
-                width: 150px; /* Espacio reservado */
+                min-width: 150px; /* Asegura espacio para el botón */
                 text-align: right;
             }}
         </style>
@@ -672,6 +678,4 @@ def catalogo():
 
 if __name__ == '__main__':
     logging.info("\n--- INICIANDO SERVIDOR FLASK EN MODO DESARROLLO ---")
-    # Nota: Para que el logo (logo.png) y las imágenes funcionen, debes crear una carpeta 'static'
-    # en el mismo directorio del archivo app.py y colocar ahí logo.png y placeholder.png.
     app.run(debug=True)
