@@ -30,6 +30,7 @@ def obtener_precio_oro() -> Tuple[float, str]:
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
     """
+    # Usar una API Key de prueba o real si se tiene
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -241,9 +242,11 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # ⚠️ CORRECCIÓN DE RESETEO DE ANCHO/TALLA AL VOLVER DEL CATÁLOGO
+    # ⚠️ CORRECCIÓN CLAVE: RESEATEO DE ANCHO/TALLA AL VOLVER DEL CATÁLOGO (GET fresh_selection=True)
     if fresh_selection:
-        # GET al regresar del catálogo: Resetea Ancho/Talla en las variables y en la sesión inmediatamente.
+        # Resetea Ancho/Talla en las variables y en la sesión.
+        # Esto asegura que los selectores estén vacíos y obliga al usuario a seleccionar
+        # o permite que la lógica de autoselección actúe *más tarde* si es necesario.
         ancho_dama = ""
         talla_dama = ""
         ancho_cab = ""
@@ -253,7 +256,6 @@ def formulario():
         session["talla_dama"] = talla_dama
         session["ancho_cab"] = ancho_cab
         session["talla_cab"] = talla_cab
-        # El código continúa para recalcular o pre-seleccionar los nuevos defaults.
 
     
     if request.method == "POST":
@@ -275,6 +277,8 @@ def formulario():
         
     
     # 4. Guardar las selecciones de anillo en sesión (asegura que POST actualice todo)
+    # Si fue GET con fresh_selection, aquí se guarda el valor reseteado ("").
+    # Si fue POST, aquí se guarda el valor seleccionado por el usuario.
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -288,8 +292,8 @@ def formulario():
 
 
     # --- 5. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
-    # Este bloque solo se ejecuta si los campos están vacíos (al resetear el modelo)
-    # y ahora se encuentra **después** del procesamiento de fresh_selection.
+    # 💡 Lógica de AUTOCALCULACIÓN/PRE-SELECCIÓN: 
+    # Solo debe rellenar si los campos están vacíos Y se ha seleccionado un modelo.
 
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
@@ -316,8 +320,9 @@ def formulario():
     anchos_d, tallas_d = get_options(modelo_dama)
     anchos_c, tallas_c = get_options(modelo_cab)
 
-    # Forzar la selección del primer ancho y talla si el modelo está seleccionado y NO HAY VALOR ACTUAL.
-    # Esto ocurre si venimos del catálogo o si cambiamos Kilates/etc. con los campos vacíos.
+    # El reseteo de 'fresh_selection' aseguró que ancho_dama y talla_dama sean "".
+    # Al estar vacíos, esta lógica se ejecuta y selecciona el primer valor del nuevo modelo.
+    # ¡Esta es la lógica deseada! Si el usuario no selecciona, se usa el primer valor.
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
@@ -331,7 +336,7 @@ def formulario():
             ancho_cab = anchos_c[0]
             session["ancho_cab"] = ancho_cab 
         if not talla_cab and tallas_c:
-            talla_cab = tallas_cab[0]
+            talla_cab = tallas_c[0]
             session["talla_cab"] = talla_cab 
 
     # --- 6. Cálculos ---
@@ -375,6 +380,7 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
+        # ⚠️ Aquí es donde se usa el valor final de ancho_actual/talla_actual (reseteado o preseleccionado)
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
