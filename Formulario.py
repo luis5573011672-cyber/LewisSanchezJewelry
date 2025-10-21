@@ -55,7 +55,7 @@ def calcular_valor_gramo(valor_onza, pureza_factor, peso_gramos):
         return 0, 0
     
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
-    monto_total = valor_gramo * peso_gramos
+    monto_total = valor_gramo * peso_gramo
     return valor_gramo, monto_total
 
 def calcular_monto_aproximado(monto_bruto):
@@ -214,21 +214,18 @@ def formulario():
     
     # --- 1. Obtener/Establecer Datos del Cliente y Anillos ---
 
-    # Cliente (CORRECCIÓN: Ya no se obtiene de la sesión, solo de la forma si fue enviada)
+    # CORRECCIÓN: Lógica para Nombre/Email. 
+    # Si es POST, toma los datos de la forma y los guarda en sesión.
+    # Si es GET (incluyendo el regreso del catálogo), usa los datos de la sesión (persistencia).
     if request.method == "POST":
-        # POST normal (submit del formulario o cambio de idioma)
-        # Si es POST, usamos lo que vino en el formulario para rellenar
+        # POST: Obtener de la forma y guardar en sesión
         nombre_cliente = request.form.get("nombre_cliente", "")
         email_cliente = request.form.get("email_cliente", "")
-    else:
-        # GET (Visita inicial o redirección)
-        # Lo inicializamos en vacío para que no haya persistencia
-        nombre_cliente = ""
-        email_cliente = ""
-
-    # Anillos (Estos SÍ persisten en sesión)
-    if request.method == "POST" and "idioma" not in request.form:
-        # POST normal (submit del formulario)
+        
+        session["nombre_cliente"] = nombre_cliente # <-- GUARDAR EN SESIÓN
+        session["email_cliente"] = email_cliente   # <-- GUARDAR EN SESIÓN
+        
+        # También cargamos datos de anillo desde el POST
         kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
         ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
         talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
@@ -236,9 +233,13 @@ def formulario():
         kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
         ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
         talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
-
+        
     else:
-        # GET, GET con fresh_selection, o POST por cambio de idioma (que redirige aquí como GET)
+        # GET (Visita inicial o regreso del catálogo): Obtener de la sesión
+        nombre_cliente = session.get("nombre_cliente", "") # <-- OBTENER DE SESIÓN
+        email_cliente = session.get("email_cliente", "")   # <-- OBTENER DE SESIÓN
+
+        # Datos de anillo desde la sesión (con valores por defecto si no existen)
         kilates_dama = session.get("kilates_dama", "14")
         ancho_dama = session.get("ancho_dama", "")
         talla_dama = session.get("talla_dama", "")
@@ -247,37 +248,39 @@ def formulario():
         ancho_cab = session.get("ancho_cab", "")
         talla_cab = session.get("talla_cab", "")
         
-        # Lógica de limpieza para GET limpio o fresh_selection
+        # Lógica de limpieza/inicialización de modelos (solo si es la visita inicial/limpia)
         if request.method == "GET" and not fresh_selection:
-            # Caso 1: GET limpio (navegación directa). ¡Limpiar sesión de modelos!
+            # Caso 1: GET limpio (navegación directa). ¡Limpiar sesión de modelos y datos de cliente!
             modelo_dama = t['seleccionar'].upper()
             metal_dama = ""
             modelo_cab = t['seleccionar'].upper()
             metal_cab = ""
+            nombre_cliente = "" # <-- Forzar limpieza solo en la visita inicial sin fresh_selection
+            email_cliente = ""  # <-- Forzar limpieza solo en la visita inicial sin fresh_selection
             
             # Limpiar la sesión para garantizar la persistencia del estado limpio
-            for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab"]:
+            for key in ["modelo_dama", "metal_dama", "modelo_cab", "metal_cab", "nombre_cliente", "email_cliente"]:
                  if key in session:
                     del session[key]
 
         else:
-            # Caso 2: POST (submit, auto-submit) O GET después de /catalogo (fresh_selection=True)
+            # Caso 2: POST O GET después de /catalogo (fresh_selection=True)
             # Cargamos los modelos/metales de la sesión (fueron guardados por catálogo o post anterior)
             modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
             metal_dama = session.get("metal_dama", "").upper()
             modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
             metal_cab = session.get("metal_cab", "").upper()
             
-            # Si venimos del catálogo, reseteamos el ancho/talla para que la lógica de "Forzar selección del primer ancho/talla" se aplique
+            # Si venimos del catálogo, reseteamos el ancho/talla (pero conservamos nombre/email)
             if fresh_selection:
                 ancho_dama = ""
                 talla_dama = ""
                 ancho_cab = ""
                 talla_cab = ""
+            # Si NO es fresh_selection (i.e. POST de idioma o POST de guardar), se usa la lógica de POST anterior.
 
     
-    # Guardar SOLO las selecciones de anillo en sesión para persistencia
-    # (Los campos de cliente ya NO se guardan para que se limpien al inicio)
+    # Guardar TODAS las selecciones de anillo en sesión para persistencia (Nombre/Email ya se guardaron en la rama POST si aplica)
     session["kilates_dama"] = kilates_dama
     session["ancho_dama"] = ancho_dama
     session["talla_dama"] = talla_dama
@@ -543,6 +546,7 @@ def catalogo():
         
         # Lógica de Retorno al Formulario
         if not seleccion:
+            # Al volver, Nombre y Correo ya están en la sesión y se recargarán en el formulario
             return redirect(url_for("formulario", fresh_selection=True))
         
         # Lógica de Selección de Anillo
