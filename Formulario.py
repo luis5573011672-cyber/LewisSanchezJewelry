@@ -22,7 +22,39 @@ df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 
 # --- FUNCIONES DE UTILIDAD (Mantenidas) ---
-# Colócalo en la sección de FUNCIONES DE UTILIDAD
+# --- COLOCAR EN LA SECCIÓN DE FUNCIONES DE UTILIDAD ---
+
+def obtener_precio_oro():
+    """
+    Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
+    Retorna (precio, estado) donde estado es "live" o "fallback".
+    """
+    # Usa tu propia API Key si tienes una.
+    API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
+    url = "https://www.goldapi.io/api/XAU/USD"
+    headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
+    
+    try:
+        # Usar fallback si la API Key es la de testing
+        if not API_KEY or API_KEY == "goldapi-4g9e8p719mgvhodho-io":
+             return DEFAULT_GOLD_PRICE, "fallback"
+             
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        price = data.get("price")
+        
+        if price is not None and not math.isnan(price):
+            return float(price), "live"
+            
+        return DEFAULT_GOLD_PRICE, "fallback"
+        
+    except (requests.exceptions.RequestException, Exception) as e:
+        logging.error(f"Error al obtener precio del oro: {e}. Usando fallback ({DEFAULT_GOLD_PRICE}).")
+        return DEFAULT_GOLD_PRICE, "fallback"
+
+# Asegúrate de que TODAS las demás funciones auxiliares también estén aquí.
+# ... (cargar_datos, calcular_valor_gramo, etc.)
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
