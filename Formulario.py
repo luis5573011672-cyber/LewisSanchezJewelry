@@ -25,10 +25,6 @@ df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 DEFAULT_SELECTION_TEXT = "SELECCIONE UNA OPCIÓN DE CATÁLOGO"
 
-# NOMBRES DE COLUMNAS ESPERADAS (Normalizadas a mayúsculas)
-COLUMNAS_WB = {"NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO", "PRICE COST", "WIDTH"}
-COLUMNAS_SIZE = {"SIZE", "ADICIONAL"}
-
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
 def obtener_precio_oro():
@@ -314,7 +310,6 @@ def formulario():
             talla_cab = ""
         else:
             # Si NO es fresh_selection, cargamos el último valor enviado por POST o guardado en sesión.
-            # El ancho ya está limpio en la sesión gracias a auto_select_and_save o la limpieza en POST
             ancho_dama = limpiar_valor_ancho(request.form.get("ancho_dama", session.get("ancho_dama", "")))
             talla_dama = str(request.form.get("talla_dama", session.get("talla_dama", ""))).strip()
             ancho_cab = limpiar_valor_ancho(request.form.get("ancho_cab", session.get("ancho_cab", "")))
@@ -547,7 +542,7 @@ def formulario():
                     </p>
                     {selectores_cab}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_adicional:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_cab:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -559,7 +554,6 @@ def formulario():
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total_redondeado:,.2f} USD</p>
                 </div>
-                
                 
                 <div class="pt-6">
                     <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
@@ -810,6 +804,6 @@ if __name__ == '__main__':
     
     # NOTA IMPORTANTE: Para que las fotos funcionen, los archivos de imagen (.png, .jpg, etc.) 
     # DEBEN estar físicamente dentro de la carpeta 'static' y tener el mismo nombre (limpio)
-    # que se extrae de la columna "RUTA FOTO" del Excel.
+    # que se extrae de la columna "RUTA FOTO" del Excel (espacios deben ser remplazados por '_').
     
     app.run(debug=True)
