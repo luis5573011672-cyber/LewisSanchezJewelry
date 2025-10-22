@@ -25,6 +25,10 @@ df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 DEFAULT_SELECTION_TEXT = "SELECCIONE UNA OPCIÓN DE CATÁLOGO"
 
+# NOMBRES DE COLUMNAS ESPERADAS (Normalizadas a mayúsculas)
+COLUMNAS_WB = {"NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO", "PRICE COST", "WIDTH"}
+COLUMNAS_SIZE = {"SIZE", "ADICIONAL"}
+
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
 def obtener_precio_oro():
@@ -82,7 +86,8 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         df = df_raw.iloc[2:].copy()
         df.columns = new_columns_df
         
-        if 'WIDTH' in df.columns:
+        # Unificación de columna de ancho (si existe WIDTH, se renombra a ANCHO)
+        if 'WIDTH' in df.columns and 'ANCHO' not in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
         # 2. Cargar la hoja SIZE
@@ -92,16 +97,26 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = new_columns_adicional
         
-        # 3. Limpieza de valores clave
-        for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO"]: 
+        # 3. Limpieza y Estandarización de valores
+        # Limpieza de valores clave en df (WEDDING BANDS)
+        for col in ["NAME", "METAL", "RUTA FOTO", "GENERO"]: 
             if col in df.columns:
-                # Estandarizar las columnas clave a string mayúscula y sin espacios
                 df[col] = df[col].astype(str).str.strip().str.upper() 
             
+        # Limpieza y estandarización de la columna ANCHO (eliminando 'MM')
+        if 'ANCHO' in df.columns:
+            df['ANCHO'] = df['ANCHO'].astype(str).apply(limpiar_valor_ancho)
+            
+        # Limpieza de valores clave en df_adicional (SIZE)
         for col in ["SIZE", "ADICIONAL"]: 
             if col in df_adicional.columns:
                 df_adicional[col] = df_adicional[col].astype(str).str.strip().str.upper()
         
+        # 4. Verificación mínima de columnas necesarias
+        if not all(col in df.columns for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "GENERO"]):
+             logging.error(f"Columnas CRÍTICAS faltantes en 'WEDDING BANDS'. Actuales: {df.columns.tolist()}")
+             return pd.DataFrame(), pd.DataFrame()
+             
         df_global = df
         df_adicional_global = df_adicional
         
@@ -110,6 +125,9 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         return df, df_adicional
         
+    except FileNotFoundError:
+        logging.error(f"Error: No se encontró el archivo Excel en la ruta: {EXCEL_PATH}")
+        return pd.DataFrame(), pd.DataFrame()
     except Exception as e:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame()
@@ -120,20 +138,21 @@ def limpiar_valor_ancho(valor_ancho: str) -> str:
     if pd.isna(valor_ancho) or not str(valor_ancho).strip():
         return ""
     
-    # 1. Quitar 'MM', 'MM.', 'MM ' o ' MM' (mayúsculas o minúsculas)
+    # 1. Eliminar 'MM', 'MM.', 'MM ' o ' MM' (mayúsculas o minúsculas)
     limpio = re.sub(r'\s*MM\s*\.?\s*$', '', str(valor_ancho).strip(), flags=re.IGNORECASE)
     # 2. Quitar el sufijo de milímetros que puede venir pegado o con punto.
     limpio = re.sub(r'MM\.?$', '', limpio, flags=re.IGNORECASE).strip()
     
-    return limpio.upper() # Retornamos en mayúsculas por consistencia con el DataFrame
-
+    return limpio.upper()
 
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-    """Extrae solo el nombre del archivo del path y limpia codificación URL."""
+    """
+    Extrae solo el nombre del archivo del path, limpia codificación URL y 
+    normaliza el nombre para que funcione como estático.
+    """
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return "placeholder.png"
     
-    # Normalizar separadores y limpiar espacios/codificación URL
     ruta_limpia = str(ruta_completa).replace('\\', '/').strip()
     
     # Intenta decodificar URL (%20, etc.)
@@ -150,9 +169,11 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     else:
         nombre_archivo = ruta_limpia.strip()
 
-    # **CLAVE:** Normalizar el nombre del archivo para que coincida con el sistema de archivos. 
-    # Aseguramos que los espacios se quiten si el nombre del archivo en 'static' no los tiene.
-    return nombre_archivo.strip().replace(' ', '_') 
+    # **CLAVE para Flask:** Reemplazar espacios por guiones bajos para nombres de archivos estáticos.
+    nombre_normalizado = nombre_archivo.strip().replace(' ', '_') 
+    
+    # Asegurar que la extensión se mantenga. 
+    return nombre_normalizado
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional."""
@@ -161,7 +182,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     # Estandarizar los inputs de búsqueda
     modelo = modelo.upper()
     metal = metal.upper()
-    # Usar el ancho LIMPIO para la búsqueda, ya que se limpió al cargar los datos
+    # Usar el ancho LIMPIO para la búsqueda
     ancho_limpio = limpiar_valor_ancho(ancho) 
     talla = talla.upper()
     genero = genero.upper()
@@ -178,18 +199,23 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     peso = 0.0
     price_cost = 0.0 # Costo Fijo
     
-    if not df_global.loc[filtro_base].empty:
-        base_fila = df_global.loc[filtro_base].iloc[0]
-        peso_raw = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0))
-        price_cost_raw = base_fila.get("PRICE COST", 0) 
-        try: peso = float(peso_raw)
-        except: peso = 0.0
-        try: price_cost = float(price_cost_raw)
-        except: price_cost = 0.0
+    try:
+        if not df_global.loc[filtro_base].empty:
+            base_fila = df_global.loc[filtro_base].iloc[0]
+            # Prioriza PESO_AJUSTADO si existe, sino usa PESO
+            peso_raw = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0)) 
+            price_cost_raw = base_fila.get("PRICE COST", 0) 
+            try: peso = float(peso_raw)
+            except: peso = 0.0
+            try: price_cost = float(price_cost_raw)
+            except: price_cost = 0.0
+    except KeyError as e:
+         logging.error(f"Error de columna al buscar peso/costo: {e}. Asegúrate de que las columnas están en el Excel.")
+         return 0.0, 0.0, 0.0
 
     # 2. Buscar el COSTO ADICIONAL en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
-    if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns:
+    if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns and "ADICIONAL" in df_adicional_local.columns:
         filtro_adicional = (df_adicional_local["SIZE"] == talla) 
         
         if not df_adicional_local.loc[filtro_adicional].empty:
@@ -237,7 +263,8 @@ def formulario():
         "cliente_datos": "Datos del Cliente" if es else "Client Details",
         "nombre": "Nombre del Cliente" if es else "Client Name",
         "email": "Email de Contacto" if es else "Contact Email",
-        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
+        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language",
+        "error_excel": "ERROR CRÍTICO: No se pudo cargar el Excel. Revisar log." if df.empty else ""
     }
     
     fresh_selection = request.args.get("fresh_selection")
@@ -287,7 +314,7 @@ def formulario():
             talla_cab = ""
         else:
             # Si NO es fresh_selection, cargamos el último valor enviado por POST o guardado en sesión.
-            # Convertir a cadena y limpiar MM
+            # El ancho ya está limpio en la sesión gracias a auto_select_and_save o la limpieza en POST
             ancho_dama = limpiar_valor_ancho(request.form.get("ancho_dama", session.get("ancho_dama", "")))
             talla_dama = str(request.form.get("talla_dama", session.get("talla_dama", ""))).strip()
             ancho_cab = limpiar_valor_ancho(request.form.get("ancho_cab", session.get("ancho_cab", "")))
@@ -326,11 +353,9 @@ def formulario():
             try: return float(value_str.replace(',', '.'))
             except ValueError: return float('inf') 
         
-        # Se obtiene el ancho LIMPIO desde el DataFrame
+        # Se obtiene el ancho LIMPIO desde el DataFrame (ya está limpio gracias a cargar_datos)
         anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().str.upper().unique().tolist() if "ANCHO" in df.columns else []
-        # Limpiar los valores de ancho ANTES de usarlos/guardarlos
-        anchos_limpios = [limpiar_valor_ancho(a) for a in anchos_raw if limpiar_valor_ancho(a)]
-        anchos = sorted(list(set(anchos_limpios)), key=sort_numeric)
+        anchos = sorted(list(set(anchos_raw)), key=sort_numeric)
         
         # Ordenar numéricamente la talla
         tallas_raw = df_adicional["SIZE"].astype(str).str.strip().str.upper().unique().tolist() if "SIZE" in df_adicional.columns else []
@@ -484,6 +509,8 @@ def formulario():
                     </div>
                 </div>
                 
+                {f'<p class="text-center text-lg text-red-700 font-bold mb-6 bg-red-100 p-3 rounded">{t["error_excel"]}</p>' if t["error_excel"] else ''}
+                
                 <p class="text-center text-sm mb-6 {precio_oro_color}">{precio_oro_status}</p>
 
                 <h2 class="text-xl font-semibold pt-4 text-gray-700">{t['cliente_datos']}</h2>
@@ -520,7 +547,7 @@ def formulario():
                     </p>
                     {selectores_cab}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_cab:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_adicional:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -532,6 +559,7 @@ def formulario():
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total_redondeado:,.2f} USD</p>
                 </div>
+                
                 
                 <div class="pt-6">
                     <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
@@ -562,7 +590,8 @@ def catalogo():
         "dama": "Dama" if es else "Lady",
         "caballero": "Caballero" if es else "Gentleman",
         "metal": "Metal" if es else "Metal",
-        "seleccion_actual": "Selección Actual" if es else "Current Selection"
+        "seleccion_actual": "Selección Actual" if es else "Current Selection",
+        "error_excel": "ERROR CRÍTICO: No se pudo cargar el Excel. Revisar log." if df.empty else ""
     }
 
     # Recuperar selecciones actuales para las etiquetas y el resaltado
@@ -602,7 +631,7 @@ def catalogo():
 
     # --- LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal) ---
     if df.empty:
-         html_error = f"""<!DOCTYPE html><html><body><div style="text-align: center; padding: 50px;"><h1 style="color: red;">Error de Carga de Datos</h1><p>No se pudo cargar el archivo Excel o la hoja "WEDDING BANDS" está vacía.</p><a href="{url_for('formulario')}">Volver al Formulario</a></div></body></html>"""
+         html_error = f"""<!DOCTYPE html><html><body><div style="text-align: center; padding: 50px;"><h1 style="color: red;">Error de Carga de Datos</h1><p>{t['error_excel']}</p><a href="{url_for('formulario')}">Volver al Formulario</a></div></body></html>"""
          return render_template_string(html_error)
 
     # Filtrar solo las columnas necesarias para el catálogo
@@ -701,6 +730,8 @@ def catalogo():
                     </div>
                 </div>
                 
+                {f'<p class="text-center text-lg text-red-700 font-bold mb-6 bg-red-100 p-3 rounded">{t["error_excel"]}</p>' if t["error_excel"] else ''}
+
                 {etiquetas_catalogo}
                 
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
