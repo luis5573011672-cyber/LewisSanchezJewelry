@@ -119,7 +119,6 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     """
     Extrae solo el nombre del archivo del path.
-    Esta es la versión corregida y robusta para el manejo de imágenes en Flask.
     """
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return "placeholder.png" # Asegúrate de tener esta imagen en static/
@@ -206,84 +205,76 @@ def formulario():
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
 
-    # Cargar datos de la SESIÓN (Valores actuales)
-    nombre_cliente = session.get("nombre_cliente", "") 
-    email_cliente = session.get("email_cliente", "") 
+    # --- 2. Carga de Variables de SESIÓN (GET) o POST (Actualización) ---
+    
+    # Datos del Cliente
+    nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", "")) 
+    email_cliente = request.form.get("email_cliente", session.get("email_cliente", "")) 
 
-    kilates_dama = session.get("kilates_dama", "14")
-    ancho_dama = session.get("ancho_dama", "")
-    talla_dama = session.get("talla_dama", "")
+    # Datos del Anillo Dama
+    kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
+    ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
+    talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
     
-    kilates_cab = session.get("kilates_cab", "14")
-    ancho_cab = session.get("ancho_cab", "")
-    talla_cab = session.get("talla_cab", "")
+    # Datos del Anillo Caballero
+    kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
+    ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
+    talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
     
-    # --- 2. Manejo de Inicio Fresco (Primera carga o después de logout) ---
+    
+    # --- 3. Manejo de Inicio Fresco o Reseteo Completo (GET sin datos) ---
     is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
     if is_root_get and session.get("modelo_dama") is None:
+        # Inicializar solo las selecciones del anillo
         session["modelo_dama"] = t['seleccionar'].upper()
         session["metal_dama"] = ""
         session["modelo_cab"] = t['seleccionar'].upper()
         session["metal_cab"] = ""
         session["kilates_dama"] = "14"
         session["kilates_cab"] = "14"
-        session["ancho_dama"] = ""
-        session["talla_dama"] = ""
-        session["ancho_cab"] = ""
-        session["talla_cab"] = ""
+        # Recargar variables locales
+        modelo_dama = t['seleccionar'].upper()
+        modelo_cab = t['seleccionar'].upper()
     
     
-    # --- 3. Manejo de POST (Actualización de formulario) CORREGIDO ---
-    if request.method == "POST":
+    # --- 4. Persistir los valores LEÍDOS del GET/POST en la SESIÓN ---
+    # Esto es CRUCIAL para que los cambios hechos en el POST (ej. kilates) 
+    # se mantengan en el siguiente GET o POST.
+    session["nombre_cliente"] = nombre_cliente 
+    session["email_cliente"] = email_cliente 
+    session["kilates_dama"] = kilates_dama
+    session["ancho_dama"] = ancho_dama
+    session["talla_dama"] = talla_dama
+    session["kilates_cab"] = kilates_cab
+    session["ancho_cab"] = ancho_cab
+    session["talla_cab"] = talla_cab
+    # El modelo y metal se manejan solo desde /catalogo
+
+    # Manejo del cambio de idioma (Redirección para actualizar textos)
+    if request.method == "POST" and "idioma" in request.form:
+         return redirect(url_for("formulario"))
         
-        # 3.1. Cliente/Idioma (Siempre se actualiza)
-        session["nombre_cliente"] = request.form.get("nombre_cliente", nombre_cliente)
-        session["email_cliente"] = request.form.get("email_cliente", email_cliente)
-        
-        if "idioma" in request.form:
-             return redirect(url_for("formulario"))
-        
-        # 3.2. Actualizar Kilates, Ancho y Talla directamente a la SESIÓN
-        # Esto asegura que el valor seleccionado en el POST se persista.
-        session["kilates_dama"] = request.form.get("kilates_dama", kilates_dama)
-        session["ancho_dama"] = request.form.get("ancho_dama", ancho_dama)
-        session["talla_dama"] = request.form.get("talla_dama", talla_dama)
-        
-        session["kilates_cab"] = request.form.get("kilates_cab", kilates_cab)
-        session["ancho_cab"] = request.form.get("ancho_cab", ancho_cab)
-        session["talla_cab"] = request.form.get("talla_cab", talla_cab)
-        
-        # Recargar las variables locales con los nuevos valores de sesión/POST
-        nombre_cliente = session["nombre_cliente"]
-        email_cliente = session["email_cliente"]
-        kilates_dama = session["kilates_dama"]
-        ancho_dama = session["ancho_dama"]
-        talla_dama = session["talla_dama"]
-        kilates_cab = session["kilates_cab"]
-        ancho_cab = session["ancho_cab"]
-        talla_cab = session["talla_cab"]
     
-    
-    # --- 4. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
+    # --- 5. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
     fresh_selection = request.args.get("fresh_selection")
     if fresh_selection:
-        # Si venimos del catálogo, reseteamos Ancho y Talla en la sesión
-        session["ancho_dama"] = ""
-        session["talla_dama"] = ""
-        session["ancho_cab"] = ""
-        session["talla_cab"] = ""
-        # Recargar variables locales
+        # Si venimos del catálogo, las variables locales ya se leyeron del POST/GET, 
+        # pero forzamos el reseteo de Ancho y Talla para la autoselección
         ancho_dama = ""
         talla_dama = ""
         ancho_cab = ""
         talla_cab = ""
+        session["ancho_dama"] = "" # Persistir el reseteo
+        session["talla_dama"] = ""
+        session["ancho_cab"] = ""
+        session["talla_cab"] = ""
 
 
-    # --- 5. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
+    # --- 6. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
             return [], []
@@ -324,7 +315,7 @@ def formulario():
             talla_cab = tallas_c[0]
             session["talla_cab"] = talla_cab 
 
-    # --- 6. Cálculos ---
+    # --- 7. Cálculos ---
     peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
@@ -341,7 +332,7 @@ def formulario():
         
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
     
-    # URL de la imagen
+    # URL de la imagen (asumiendo que está en /static/logo.png)
     logo_url = url_for('static', filename='logo.png')
 
 
