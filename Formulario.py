@@ -115,6 +115,19 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         return pd.DataFrame(), pd.DataFrame()
     
 
+def limpiar_valor_ancho(valor_ancho: str) -> str:
+    """Limpia el valor del ancho, quitando 'MM', 'MM.' o espacios extra, dejando solo el número."""
+    if pd.isna(valor_ancho) or not str(valor_ancho).strip():
+        return ""
+    
+    # 1. Quitar 'MM', 'MM.', 'MM ' o ' MM' (mayúsculas o minúsculas)
+    limpio = re.sub(r'\s*MM\s*\.?\s*$', '', str(valor_ancho).strip(), flags=re.IGNORECASE)
+    # 2. Quitar el sufijo de milímetros que puede venir pegado o con punto.
+    limpio = re.sub(r'MM\.?$', '', limpio, flags=re.IGNORECASE).strip()
+    
+    return limpio.upper() # Retornamos en mayúsculas por consistencia con el DataFrame
+
+
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     """Extrae solo el nombre del archivo del path y limpia codificación URL."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
@@ -123,12 +136,11 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     # Normalizar separadores y limpiar espacios/codificación URL
     ruta_limpia = str(ruta_completa).replace('\\', '/').strip()
     
-    # Intentar decodificar URL (para %20, etc.)
+    # Intenta decodificar URL (%20, etc.)
     try:
         from urllib.parse import unquote
         ruta_limpia = unquote(ruta_limpia)
     except ImportError:
-        # Fallback si no está disponible urllib
         ruta_limpia = ruta_limpia.replace('%20', ' ')
     
     # Extraer el nombre del archivo al final de la ruta
@@ -136,10 +148,11 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     if match:
         nombre_archivo = match.group(0).strip()
     else:
-        nombre_archivo = ruta_limpia.strip() # Fallback si es solo el nombre
+        nombre_archivo = ruta_limpia.strip()
 
-    # Limpieza final de espacios
-    return nombre_archivo.strip()
+    # **CLAVE:** Normalizar el nombre del archivo para que coincida con el sistema de archivos. 
+    # Aseguramos que los espacios se quiten si el nombre del archivo en 'static' no los tiene.
+    return nombre_archivo.strip().replace(' ', '_') 
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional."""
@@ -148,16 +161,17 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     # Estandarizar los inputs de búsqueda
     modelo = modelo.upper()
     metal = metal.upper()
-    ancho = ancho.upper()
+    # Usar el ancho LIMPIO para la búsqueda, ya que se limpió al cargar los datos
+    ancho_limpio = limpiar_valor_ancho(ancho) 
     talla = talla.upper()
     genero = genero.upper()
 
-    if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
+    if df_global.empty or not all([modelo, metal, ancho_limpio, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0 
         
     # 1. Buscar el PESO y COSTO FIJO en df (WEDDING BANDS)
     filtro_base = (df_global["NAME"] == modelo) & \
-                  (df_global["ANCHO"] == ancho) & \
+                  (df_global["ANCHO"] == ancho_limpio) & \
                   (df_global["METAL"] == metal) & \
                   (df_global["GENERO"] == genero) 
     
@@ -273,10 +287,10 @@ def formulario():
             talla_cab = ""
         else:
             # Si NO es fresh_selection, cargamos el último valor enviado por POST o guardado en sesión.
-            # Convertir a cadena para comparación consistente, ya que el ancho se guarda como cadena.
-            ancho_dama = str(request.form.get("ancho_dama", session.get("ancho_dama", ""))).strip()
+            # Convertir a cadena y limpiar MM
+            ancho_dama = limpiar_valor_ancho(request.form.get("ancho_dama", session.get("ancho_dama", "")))
             talla_dama = str(request.form.get("talla_dama", session.get("talla_dama", ""))).strip()
-            ancho_cab = str(request.form.get("ancho_cab", session.get("ancho_cab", ""))).strip()
+            ancho_cab = limpiar_valor_ancho(request.form.get("ancho_cab", session.get("ancho_cab", "")))
             talla_cab = str(request.form.get("talla_cab", session.get("talla_cab", ""))).strip()
 
 
@@ -312,9 +326,11 @@ def formulario():
             try: return float(value_str.replace(',', '.'))
             except ValueError: return float('inf') 
         
-        # Se obtiene el ancho como str para comparación consistente
+        # Se obtiene el ancho LIMPIO desde el DataFrame
         anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().str.upper().unique().tolist() if "ANCHO" in df.columns else []
-        anchos = sorted(anchos_raw, key=sort_numeric)
+        # Limpiar los valores de ancho ANTES de usarlos/guardarlos
+        anchos_limpios = [limpiar_valor_ancho(a) for a in anchos_raw if limpiar_valor_ancho(a)]
+        anchos = sorted(list(set(anchos_limpios)), key=sort_numeric)
         
         # Ordenar numéricamente la talla
         tallas_raw = df_adicional["SIZE"].astype(str).str.strip().str.upper().unique().tolist() if "SIZE" in df_adicional.columns else []
@@ -386,7 +402,7 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # Selectores de Ancho y Talla - **CORREGIDO: El valor de la opción no tiene "mm"**
+        # Selectores de Ancho y Talla - **CORREGIDO: Solo muestra el número + ' mm'**
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -516,8 +532,6 @@ def formulario():
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total_redondeado:,.2f} USD</p>
                 </div>
-                <p class="text-sm text-gray-500 text-right">(Monto original: ${monto_total_raw:,.2f} USD, redondeado a la decena superior)</p>
-
                 
                 <div class="pt-6">
                     <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
@@ -764,7 +778,7 @@ if __name__ == '__main__':
     os.makedirs('static', exist_ok=True) 
     
     # NOTA IMPORTANTE: Para que las fotos funcionen, los archivos de imagen (.png, .jpg, etc.) 
-    # DEBEN estar físicamente dentro de la carpeta 'static' y tener el mismo nombre que se 
-    # extrae de la columna "RUTA FOTO" del Excel.
+    # DEBEN estar físicamente dentro de la carpeta 'static' y tener el mismo nombre (limpio)
+    # que se extrae de la columna "RUTA FOTO" del Excel.
     
     app.run(debug=True)
