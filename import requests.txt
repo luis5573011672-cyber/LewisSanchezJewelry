@@ -4,8 +4,6 @@ import pandas as pd
 from flask import Flask, request, render_template_string, session, redirect, url_for
 import logging
 import math
-import re  # Necesario para la función de imagen
-from urllib.parse import unquote # Importado por si es necesario para decodificación URL
 from typing import Tuple, List
 
 # Configuración de Logging
@@ -14,7 +12,6 @@ logging.basicConfig(level=logging.INFO)
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
 # Es CRUCIAL que la clave secreta se establezca para que las sesiones funcionen.
-# DEBES CAMBIAR ESTA CLAVE EN PRODUCCIÓN
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
 # Asegúrate de que este archivo exista en la misma ubicación que tu script.
@@ -30,7 +27,8 @@ df_adicional_global = pd.DataFrame()
 
 def obtener_precio_oro() -> Tuple[float, str]:
     """
-    Obtiene el precio actual del oro (XAU/USD) por onza.
+    Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
+    Retorna (precio, estado) donde estado es "live" o "fallback".
     """
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
@@ -45,7 +43,7 @@ def obtener_precio_oro() -> Tuple[float, str]:
         if price is not None and not math.isnan(price):
             return float(price), "live"
             
-        logging.warning("API respondió OK (200), pero el precio era inválido. Usando fallback.")
+        logging.warning("API respondió OK (200), pero faltaba o era inválido el precio. Usando fallback.")
         return DEFAULT_GOLD_PRICE, "fallback"
         
     except (requests.exceptions.RequestException, Exception) as e:
@@ -63,7 +61,9 @@ def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: f
     return valor_gramo, monto_total
 
 def calcular_monto_aproximado(monto_bruto: float) -> float:
-    """Aproxima (redondea hacia arriba) el monto al múltiplo de 10 más cercano."""
+    """
+    Aproxima (redondea hacia arriba) el monto al múltiplo de 10 más cercano.
+    """
     if monto_bruto <= 0:
         return 0.0
     
@@ -109,40 +109,25 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         
         df_global = df
         df_adicional_global = df_adicional
-        
+                
         return df, df_adicional
         
     except Exception as e:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame()
     
-# --------------------- FUNCIÓN DE IMAGEN CORREGIDA ---------------------
+
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-    """
-    Extrae solo el nombre del archivo del path.
-    Esta versión es la más simple y robusta para tu caso, asumiendo 
-    que el nombre en Excel coincide con el nombre en la carpeta 'static/'.
-    """
+    """Extrae solo el nombre del archivo del path."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        # Devuelve un placeholder por si no hay ruta
-        return "placeholder.png" 
+        return ""
     
     ruta_limpia = str(ruta_completa).replace('\\', '/')
-    
-    # Usamos os.path.basename para extraer el nombre del archivo al final de la ruta
     nombre_archivo = os.path.basename(ruta_limpia).strip()
-    
-    # Opcional: Si el nombre está codificado (%20), decodificarlo para obtener el nombre real en disco
-    nombre_archivo_final = unquote(nombre_archivo)
-    
-    # Devuelve el nombre del archivo. Debe coincidir *exactamente* con el archivo en static/.
-    return nombre_archivo_final
+    return nombre_archivo.replace('%20', ' ')
 
-# ----------------------------------------------------------------------
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional en los DataFrames."""
-    
-    global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0 
@@ -211,10 +196,6 @@ def formulario():
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
 
-    # Cargar datos del cliente: Siempre leemos de la sesión.
-    nombre_cliente = session.get("nombre_cliente", "") 
-    email_cliente = session.get("email_cliente", "") 
-
     # Cargar datos del anillo de la SESIÓN (Valores actuales)
     kilates_dama = session.get("kilates_dama", "14")
     ancho_dama = session.get("ancho_dama", "")
@@ -230,9 +211,10 @@ def formulario():
     
     # ⚠️ MANEJO DE INICIO FRESCO O RESETEO COMPLETO
     is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
-    if is_root_get and session.get("modelo_dama") is None:
-        logging.info("Inicio fresco: Inicializando valores de anillo por defecto.")
-        # Los datos de nombre/email se mantienen si existen. Solo inicializamos las selecciones.
+    if is_root_get and session.get("modelo_dama") == None:
+        logging.info("Inicio fresco: Limpiando datos de cliente y anillo.")
+        session["nombre_cliente"] = ""
+        session["email_cliente"] = ""
         session["modelo_dama"] = t['seleccionar'].upper()
         session["metal_dama"] = ""
         session["modelo_cab"] = t['seleccionar'].upper()
@@ -244,11 +226,14 @@ def formulario():
         session["ancho_cab"] = ""
         session["talla_cab"] = ""
     
-    
+    # Cargar datos del cliente
+    nombre_cliente = session.get("nombre_cliente", "") 
+    email_cliente = session.get("email_cliente", "") 
+
     # --- 2. Manejo de POST (Incluyendo cambio de Kilates) ---
     if request.method == "POST":
         
-        # 2.1. Guardar SIEMPRE los datos del cliente que vinieron en el POST
+        # 2.1. Guardar siempre los datos del cliente que vinieron en el POST
         nombre_cliente = request.form.get("nombre_cliente", nombre_cliente)
         email_cliente = request.form.get("email_cliente", email_cliente)
         session["nombre_cliente"] = nombre_cliente 
@@ -259,10 +244,15 @@ def formulario():
              return redirect(url_for("formulario"))
         
         # 2.3. Guardar las selecciones de anillo que vinieron en el POST
+        # Usamos request.form.get(..., VALOR_ACTUAL) para asegurar que si solo se cambia un select,
+        # los otros selects mantengan el valor ACTUAL de la sesión (ej. si se envía Kilates, Ancho/Talla permanecen).
+        
+        # Anillo Dama
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
         
+        # Anillo Caballero
         kilates_cab = request.form.get("kilates_cab", kilates_cab)
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
@@ -321,6 +311,7 @@ def formulario():
     anchos_c, tallas_c = get_options(modelo_cab)
 
     # Autoselección si el campo está vacío (ej. después de fresh_selection o cambio de modelo)
+    # Se debe re-asignar a la variable local y a la sesión
     if modelo_dama != t['seleccionar'].upper():
         if not ancho_dama and anchos_d:
             ancho_dama = anchos_d[0]
@@ -356,14 +347,12 @@ def formulario():
     
     # URL de la imagen (asumiendo que está en /static/logo.png)
     logo_url = url_for('static', filename='logo.png')
-
-
+    
     # --------------------- Generación del HTML para el Formulario ---------------------
-        
+    
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # El select de kilates debe hacer POST al ser cambiado
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -518,32 +507,7 @@ def formulario():
                         {t['guardar']} (Aplicar Cambios y Guardar)
                     </button>
                 </div>
-            </form> 
-        </div>
-        
-        <script>
-            const nombreInput = document.getElementById('nombre_cliente');
-            const emailInput = document.getElementById('email_cliente');
-
-            // 1. Cargar datos de localStorage al cargar la página
-            document.addEventListener('DOMContentLoaded', () => {{
-                // Se usa {{ y }} para escapar las llaves de JavaScript de la f-string de Python
-                if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
-                    nombreInput.value = localStorage.getItem('nombre_cliente');
-                }}
-                if (!emailInput.value && localStorage.getItem('email_cliente')) {{
-                    emailInput.value = localStorage.getItem('email_cliente');
-                }}
-            }});
-
-            // 2. Guardar datos en localStorage al cambiar el input (en tiempo real)
-            nombreInput.addEventListener('input', (e) => {{
-                localStorage.setItem('nombre_cliente', e.target.value);
-            }});
-            emailInput.addEventListener('input', (e) => {{
-                localStorage.setItem('email_cliente', e.target.value);
-            }});
-        </script>
+            </form> </div>
     </body>
     </html>
     """
@@ -564,12 +528,12 @@ def catalogo():
         seleccion = request.form.get("seleccion")
         tipo = request.form.get("tipo")
         
-        # Lógica de Retorno al Formulario - Activado por el botón "Volver al Formulario"
-        if request.form.get("volver_btn") == "true":
-            # Redirige con fresh_selection=True para forzar el reseteo de Ancho/Talla en /
+        # Lógica de Retorno al Formulario
+        if not seleccion:
+            # Volver al formulario con fresh_selection=True para resetear Ancho/Talla
             return redirect(url_for("formulario", fresh_selection=True))
         
-        # Lógica de Selección de Anillo - Activado por botones "Seleccionar Dama/Caballero"
+        # Lógica de Selección de Anillo
         if seleccion and tipo:
             try:
                 modelo, metal = seleccion.split(";")
@@ -580,7 +544,7 @@ def catalogo():
                 session[f"talla_{tipo}"] = ""
                 
                 tipo_display = "Dama" if tipo == "dama" else "Caballero"
-                mensaje_exito = f"✅ ¡Modelo **{modelo} ({metal})** para **{tipo_display}** guardado! Seleccione el otro o presione 'Volver al Formulario'."
+                mensaje_exito = f"✅ ¡Modelo y Metal para {tipo_display} guardado! Seleccione el otro o presione 'Volver al Formulario'."
                 
             except ValueError:
                 logging.error("Error en el formato de selección del catálogo.")
@@ -609,7 +573,7 @@ def catalogo():
     logo_url = url_for('static', filename='logo.png')
     
     if df.empty:
-          html_catalogo = f"""
+         html_catalogo = f"""
         <!DOCTYPE html>
         <html><body><div style="text-align: center; padding: 50px;">
         <h1 style="color: red;">Error de Carga de Datos</h1>
@@ -618,7 +582,7 @@ def catalogo():
         <a href="{url_for('formulario')}">Volver al Formulario</a>
         </div></body></html>
         """
-          return render_template_string(html_catalogo)
+         return render_template_string(html_catalogo)
 
 
     # LÓGICA DE AGRUPACIÓN (Tarjeta por Variante Única: Modelo + Metal)
@@ -639,58 +603,6 @@ def catalogo():
 
     # --------------------- HTML/JINJA2 para el Catálogo ---------------------
     
-    html_items = ""
-    for item in catalogo_items:
-        modelo = item["modelo"]
-        metal = item["metal"]
-        nombre_foto = item["nombre_foto"]
-        ruta_web_foto = url_for('static', filename=nombre_foto)
-
-        # Determinar si está seleccionado para Dama, Caballero, o ambos
-        borde_clase = ""
-        etiqueta = ""
-        seleccionado_dama = (modelo == modelo_dama_actual and metal == metal_dama_actual)
-        seleccionado_cab = (modelo == modelo_cab_actual and metal == metal_cab_actual)
-
-        if seleccionado_dama and seleccionado_cab:
-            borde_clase = "selected-both"
-            etiqueta = f'<span class="absolute top-2 left-2 bg-green-500 text-white px-2 py-1 rounded-full text-xs font-bold">Ambos ({t["dama"]}/{t["caballero"]})</span>'
-        elif seleccionado_dama:
-            borde_clase = "selected-dama"
-            etiqueta = f'<span class="absolute top-2 left-2 bg-pink-500 text-white px-2 py-1 rounded-full text-xs font-bold">{t["dama"]}</span>'
-        elif seleccionado_cab:
-            borde_clase = "selected-cab"
-            etiqueta = f'<span class="absolute top-2 left-2 bg-blue-500 text-white px-2 py-1 rounded-full text-xs font-bold">{t["caballero"]}</span>'
-
-        html_items += f"""
-        <div class="card p-4 flex flex-col items-center text-center relative {borde_clase}">
-            {etiqueta}
-            <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
-                 class="w-full h-auto max-h-48 object-contain rounded-lg mb-3" 
-                 onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
-            >
-            <h2 class="text-lg font-semibold text-gray-800">{modelo}</h2>
-            <p class="text-sm text-gray-600">{t['metal']}: {metal}</p>
-            <div class="mt-4 flex flex-col space-y-2 w-full">
-                <form method="POST" action="{url_for('catalogo')}" class="w-full">
-                    <input type="hidden" name="seleccion" value="{modelo};{metal}">
-                    <input type="hidden" name="tipo" value="dama">
-                    <button type="submit" class="w-full px-3 py-2 text-white bg-pink-600 rounded-lg hover:bg-pink-700 transition duration-150 text-sm font-semibold">
-                        Seleccionar {t['dama']}
-                    </button>
-                </form>
-                <form method="POST" action="{url_for('catalogo')}" class="w-full">
-                    <input type="hidden" name="seleccion" value="{modelo};{metal}">
-                    <input type="hidden" name="tipo" value="cab">
-                    <button type="submit" class="w-full px-3 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition duration-150 text-sm font-semibold">
-                        Seleccionar {t['caballero']}
-                    </button>
-                </form>
-            </div>
-        </div>
-        """
-
-
     html_catalogo = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
@@ -735,39 +647,83 @@ def catalogo():
                 <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                 <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
                 
-                <div style="width: 60px; margin-left: 15px;"></div> 
+<div style="width: 60px; margin-left: 15px;"></div> 
             </div>
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
 
             <form method="POST" action="{url_for('catalogo')}">
                 <div class="mb-8 text-center">
-                    <input type="hidden" name="volver_btn" value="true">
-                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50">
+                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150" name="volver_btn" value="true">
                         {t['volver']}
                     </button>
                 </div>
-            </form>
             
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                {html_items}
-            </div>
-            
-            <form method="POST" action="{url_for('catalogo')}">
-                <div class="my-8 text-center">
-                    <input type="hidden" name="volver_btn" value="true">
-                    <button type="submit" class="px-6 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50">
-                        {t['volver']}
-                    </button>
-                </div>
-            </form>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+    """
+    
+    # Iterar sobre la lista de variantes únicas
+    for item in catalogo_items:
+        modelo = item['modelo']
+        metal = item['metal']
+        nombre_foto = item['nombre_foto']
+        # La URL de la foto asume que la imagen está en la carpeta 'static'
+        ruta_web_foto = url_for('static', filename=nombre_foto) 
+        valor_seleccion = f"{modelo};{metal}"
+        
+        # Lógica de estado de selección para el Card
+        is_dama = modelo == modelo_dama_actual and metal == metal_dama_actual
+        is_cab = modelo == modelo_cab_actual and metal == metal_cab_actual
+        card_class = "card"
+        status_text = ""
+        
+        if is_dama and is_cab:
+            card_class += " selected-both"
+            status_text = "✅ Ambos seleccionados"
+        elif is_dama:
+            card_class += " selected-dama"
+            status_text = f"✅ {t['dama']} seleccionada"
+        elif is_cab:
+            card_class += " selected-cab"
+            status_text = f"✅ {t['caballero']} seleccionado"
 
+
+        html_catalogo += f"""
+                    <div class="{card_class} p-4 flex flex-col items-center text-center">
+                        <img src="{ruta_web_foto}" alt="{modelo} - {metal}" 
+                             class="w-full h-auto max-h-48 object-contain rounded-lg mb-3" 
+                             onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
+                        >
+                        <p class="text-xl font-bold text-gray-900 mb-1">{modelo}</p>
+                        <p class="text-md font-semibold text-indigo-700 mb-2">{t['metal']}: {metal}</p>
+                        <p class="selection-status text-green-600">{status_text}</p>
+
+                        <div class="mt-2 space-y-3 w-full border-t pt-3">
+                            <button type="submit" name="seleccion" value="{valor_seleccion}" 
+                                    class="inline-block w-full px-3 py-1.5 text-white bg-pink-500 rounded text-sm font-semibold hover:bg-pink-600 transition duration-150 text-center mb-1" 
+                                    onclick="document.getElementById('tipo_input').value='dama';">
+                                Seleccionar {t['dama']}
+                            </button>
+                            
+                            <button type="submit" name="seleccion" value="{valor_seleccion}" 
+                                    class="inline-block w-full px-3 py-1.5 text-white bg-blue-500 rounded text-sm font-semibold hover:bg-blue-600 transition duration-150 text-center"
+                                    onclick="document.getElementById('tipo_input').value='cab';">
+                                Seleccionar {t['caballero']}
+                            </button>
+                        </div>
+                    </div>
+                    """
+
+    html_catalogo += """
+                </div>
+                <input type="hidden" id="tipo_input" name="tipo" value="">
+            </form>
         </div>
     </body>
     </html>
     """
     return render_template_string(html_catalogo)
 
-if __name__ == "__main__":
-    # La configuración de reloader a True es útil en desarrollo
+if __name__ == '__main__':
+    logging.info("\n--- INICIANDO SERVIDOR FLASK EN MODO DESARROLLO ---")
     app.run(debug=True)
