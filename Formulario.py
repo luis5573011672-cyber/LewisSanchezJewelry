@@ -4,8 +4,7 @@ import pandas as pd
 from flask import Flask, request, render_template_string, session, redirect, url_for
 import logging
 import math
-import re  # Necesario para la función de imagen
-from urllib.parse import unquote # Importado por si es necesario para decodificación URL
+from urllib.parse import unquote # Importado para la función de imagen
 from typing import Tuple, List
 
 # Configuración de Logging
@@ -116,29 +115,24 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame()
     
-# --------------------- FUNCIÓN DE IMAGEN CORREGIDA ---------------------
+
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     """
     Extrae solo el nombre del archivo del path.
-    Esta versión es la más simple y robusta para tu caso, asumiendo 
-    que el nombre en Excel coincide con el nombre en la carpeta 'static/'.
+    Esta es la versión corregida y robusta para el manejo de imágenes en Flask.
     """
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        # Devuelve un placeholder por si no hay ruta
-        return "placeholder.png" 
+        return "placeholder.png" # Asegúrate de tener esta imagen en static/
     
     ruta_limpia = str(ruta_completa).replace('\\', '/')
-    
-    # Usamos os.path.basename para extraer el nombre del archivo al final de la ruta
     nombre_archivo = os.path.basename(ruta_limpia).strip()
     
-    # Opcional: Si el nombre está codificado (%20), decodificarlo para obtener el nombre real en disco
+    # Usamos unquote para manejar posibles codificaciones URL como %20
     nombre_archivo_final = unquote(nombre_archivo)
     
-    # Devuelve el nombre del archivo. Debe coincidir *exactamente* con el archivo en static/.
+    # Importante: El nombre debe coincidir EXACTAMENTE (case-sensitive) con el archivo en static/
     return nombre_archivo_final
 
-# ----------------------------------------------------------------------
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional en los DataFrames."""
     
@@ -245,7 +239,7 @@ def formulario():
         session["talla_cab"] = ""
     
     
-    # --- 2. Manejo de POST (Incluyendo cambio de Kilates) ---
+    # --- 2. Manejo de POST (Incluyendo cambio de Kilates, Ancho o Talla) ---
     if request.method == "POST":
         
         # 2.1. Guardar SIEMPRE los datos del cliente que vinieron en el POST
@@ -259,6 +253,7 @@ def formulario():
              return redirect(url_for("formulario"))
         
         # 2.3. Guardar las selecciones de anillo que vinieron en el POST
+        # Se leen directamente de los formularios, ya que solo cambian con un POST (cambio de select)
         kilates_dama = request.form.get("kilates_dama", kilates_dama)
         ancho_dama = request.form.get("ancho_dama", ancho_dama)
         talla_dama = request.form.get("talla_dama", talla_dama)
@@ -267,11 +262,11 @@ def formulario():
         ancho_cab = request.form.get("ancho_cab", ancho_cab)
         talla_cab = request.form.get("talla_cab", talla_cab)
         
-        # Aseguramos que el modelo/metal se mantenga leyendo de la sesión
-        modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
-        metal_dama = session.get("metal_dama", "").upper()
-        modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
-        metal_cab = session.get("metal_cab", "").upper()
+        # El modelo y metal se mantienen de la sesión, ya que solo cambian desde /catalogo
+        # modelo_dama = session.get("modelo_dama", t['seleccionar']).upper() # Ya se cargó antes
+        # metal_dama = session.get("metal_dama", "").upper() # Ya se cargó antes
+        # modelo_cab = session.get("modelo_cab", t['seleccionar']).upper() # Ya se cargó antes
+        # metal_cab = session.get("metal_cab", "").upper() # Ya se cargó antes
         
     
     # --- 3. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
