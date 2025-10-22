@@ -116,22 +116,30 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
     
 
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-    """Extrae solo el nombre del archivo del path."""
+    """Extrae solo el nombre del archivo del path y limpia codificación URL."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return "placeholder.png"
     
-    # Normalizar separadores y eliminar caracteres especiales comunes en rutas
+    # Normalizar separadores y limpiar espacios/codificación URL
     ruta_limpia = str(ruta_completa).replace('\\', '/').strip()
     
-    # Extraer el nombre del archivo. Usar un regex para manejar rutas UNC o URL
+    # Intentar decodificar URL (para %20, etc.)
+    try:
+        from urllib.parse import unquote
+        ruta_limpia = unquote(ruta_limpia)
+    except ImportError:
+        # Fallback si no está disponible urllib
+        ruta_limpia = ruta_limpia.replace('%20', ' ')
+    
+    # Extraer el nombre del archivo al final de la ruta
     match = re.search(r'[^/\\?#]+$', ruta_limpia)
     if match:
-        nombre_archivo = match.group(0)
+        nombre_archivo = match.group(0).strip()
     else:
-        nombre_archivo = ruta_limpia # Fallback si es solo el nombre
+        nombre_archivo = ruta_limpia.strip() # Fallback si es solo el nombre
 
-    # Limpiar espacios y URL encoding residual (ej. %20)
-    return nombre_archivo.replace('%20', ' ').strip()
+    # Limpieza final de espacios
+    return nombre_archivo.strip()
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional."""
@@ -265,10 +273,11 @@ def formulario():
             talla_cab = ""
         else:
             # Si NO es fresh_selection, cargamos el último valor enviado por POST o guardado en sesión.
-            ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
-            talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
-            ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
-            talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
+            # Convertir a cadena para comparación consistente, ya que el ancho se guarda como cadena.
+            ancho_dama = str(request.form.get("ancho_dama", session.get("ancho_dama", ""))).strip()
+            talla_dama = str(request.form.get("talla_dama", session.get("talla_dama", ""))).strip()
+            ancho_cab = str(request.form.get("ancho_cab", session.get("ancho_cab", ""))).strip()
+            talla_cab = str(request.form.get("talla_cab", session.get("talla_cab", ""))).strip()
 
 
     # --- 2. Manejo de POST (Guardar y redirigir para recálculo) ---
@@ -287,7 +296,6 @@ def formulario():
         session["talla_cab"] = talla_cab
         
         # Redirigir si se cambió idioma o kilates, ancho, o talla (auto-submit)
-        # Esto asegura que el cálculo se realice con el estado de sesión actualizado
         if "idioma" in request.form or "kilates_dama" in request.form or "kilates_cab" in request.form or "ancho_dama" in request.form or "ancho_cab" in request.form or "talla_dama" in request.form or "talla_cab" in request.form:
              return redirect(url_for("formulario"))
 
@@ -304,13 +312,12 @@ def formulario():
             try: return float(value_str.replace(',', '.'))
             except ValueError: return float('inf') 
         
-        # Se obtiene el ancho como str para comparar con el valor de la sesión
+        # Se obtiene el ancho como str para comparación consistente
         anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().str.upper().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric)
         
         # Ordenar numéricamente la talla
         tallas_raw = df_adicional["SIZE"].astype(str).str.strip().str.upper().unique().tolist() if "SIZE" in df_adicional.columns else []
-        # Ordena por el valor numérico extraído de la talla
         tallas = sorted(tallas_raw, key=lambda x: (sort_numeric(re.sub(r'[^\d\.]', '', x)), x))
         
         return anchos, tallas
@@ -328,7 +335,7 @@ def formulario():
             if not actual_talla and tallas_disponibles:
                 actual_talla = tallas_disponibles[0]
         
-        # Guardar en sesión (necesario para el cálculo antes del POST si no se hizo submit)
+        # Guardar en sesión
         session[session_key_ancho] = actual_ancho
         session[session_key_talla] = actual_talla
             
@@ -379,7 +386,7 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # Selectores de Ancho y Talla - **CORREGIDO: Solo se muestra 'mm' en la etiqueta, no en el valor de la opción**
+        # Selectores de Ancho y Talla - **CORREGIDO: El valor de la opción no tiene "mm"**
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -598,7 +605,7 @@ def catalogo():
         catalogo_items.append({
             "modelo": modelo,
             "metal": metal,
-            # Asegurar que el nombre del archivo se extraiga correctamente
+            # Asegurar que el nombre del archivo se extraiga y limpie correctamente
             "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto) 
         })
 
@@ -689,7 +696,7 @@ def catalogo():
         modelo = item['modelo']
         metal = item['metal']
         nombre_foto = item['nombre_foto']
-        # **CORREGIDO:** Uso de url_for para construir la ruta estática
+        # Uso de url_for para construir la ruta estática
         ruta_web_foto = url_for('static', filename=nombre_foto) 
         valor_seleccion = f"{modelo};{metal}"
         
@@ -755,5 +762,9 @@ if __name__ == '__main__':
     
     # Crea un directorio 'static' y añade 'logo.png' y 'placeholder.png'
     os.makedirs('static', exist_ok=True) 
+    
+    # NOTA IMPORTANTE: Para que las fotos funcionen, los archivos de imagen (.png, .jpg, etc.) 
+    # DEBEN estar físicamente dentro de la carpeta 'static' y tener el mismo nombre que se 
+    # extrae de la columna "RUTA FOTO" del Excel.
     
     app.run(debug=True)
