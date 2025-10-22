@@ -77,7 +77,6 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
     try:
         # 1. Cargar la hoja WEDDING BANDS
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
-        # Asume que la fila 1 (índice 1) tiene los nombres de las columnas que queremos usar.
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         df = df_raw.iloc[2:].copy()
         df.columns = new_columns_df
@@ -87,7 +86,6 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
             
         # 2. Cargar la hoja SIZE
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
-        # Asume que la fila 0 (índice 0) tiene los nombres de las columnas.
         new_columns_adicional = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = new_columns_adicional
@@ -120,18 +118,9 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
         return "placeholder.png"
     
-    # Normalizar separadores y eliminar caracteres especiales comunes en rutas
-    ruta_limpia = str(ruta_completa).replace('\\', '/').strip()
-    
-    # Extraer el nombre del archivo. Usar un regex para manejar rutas UNC o URL
-    match = re.search(r'[^/\\?#]+$', ruta_limpia)
-    if match:
-        nombre_archivo = match.group(0)
-    else:
-        nombre_archivo = ruta_limpia # Fallback si es solo el nombre
-
-    # Limpiar espacios y URL encoding residual (ej. %20)
-    return nombre_archivo.replace('%20', ' ').strip()
+    ruta_limpia = str(ruta_completa).replace('\\', '/')
+    nombre_archivo = os.path.basename(ruta_limpia).strip()
+    return nombre_archivo.replace('%20', ' ')
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional."""
@@ -178,12 +167,6 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 
     return peso, price_cost, cost_adicional
 
-def redondear_a_decena_superior(monto: float) -> float:
-    """Redondea el monto al alza a la decena más cercana (ej. 1225.49 -> 1230.00)."""
-    if monto <= 0:
-        return 0.0
-    return math.ceil(monto / 10.0) * 10.0
-
 # --------------------- RUTAS FLASK ---------------------
 
 @app.route("/", methods=["GET", "POST"])
@@ -194,7 +177,7 @@ def formulario():
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
 
-    monto_total_raw = 0.0
+    monto_total = 0.0
     
     # Manejo de Idioma
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
@@ -304,7 +287,6 @@ def formulario():
             try: return float(value_str.replace(',', '.'))
             except ValueError: return float('inf') 
         
-        # Se obtiene el ancho como str para comparar con el valor de la sesión
         anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().str.upper().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric)
         
@@ -343,17 +325,14 @@ def formulario():
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0.0), peso_dama)
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama 
-        monto_total_raw += monto_dama
+        monto_total += monto_dama
 
     peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", DEFAULT_SELECTION_TEXT)
     monto_cab = 0.0
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0.0), peso_cab)
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
-        monto_total_raw += monto_cab
-    
-    # Aplicar redondeo al alza a la decena superior solo al monto final
-    monto_total_redondeado = redondear_a_decena_superior(monto_total_raw)
+        monto_total += monto_cab
         
     logo_url = url_for('static', filename='logo.png')
     
@@ -379,7 +358,7 @@ def formulario():
             
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
         
-        # Selectores de Ancho y Talla - **CORREGIDO: Solo se muestra 'mm' en la etiqueta, no en el valor de la opción**
+        # Selectores de Ancho y Talla - **AÑADIDO onchange="this.form.submit()"** para el recálculo
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -507,10 +486,8 @@ def formulario():
 
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
-                    <p class="text-4xl font-extrabold text-indigo-600">${monto_total_redondeado:,.2f} USD</p>
+                    <p class="text-4xl font-extrabold text-indigo-600">${monto_total:,.2f} USD</p>
                 </div>
-                <p class="text-sm text-gray-500 text-right">(Monto original: ${monto_total_raw:,.2f} USD, redondeado a la decena superior)</p>
-
                 
                 <div class="pt-6">
                     <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
@@ -598,8 +575,7 @@ def catalogo():
         catalogo_items.append({
             "modelo": modelo,
             "metal": metal,
-            # Asegurar que el nombre del archivo se extraiga correctamente
-            "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto) 
+            "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto)
         })
 
     # Etiquetas de Selección Actual en el Catálogo
@@ -689,7 +665,7 @@ def catalogo():
         modelo = item['modelo']
         metal = item['metal']
         nombre_foto = item['nombre_foto']
-        # **CORREGIDO:** Uso de url_for para construir la ruta estática
+        # url_for('static',...) asume que tienes un directorio 'static' en tu proyecto.
         ruta_web_foto = url_for('static', filename=nombre_foto) 
         valor_seleccion = f"{modelo};{metal}"
         
