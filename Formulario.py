@@ -6,6 +6,7 @@ import logging
 import re
 import math
 from typing import Tuple, List
+from urllib.parse import unquote # Importar unquote para decodificar URL
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +28,7 @@ DEFAULT_SELECTION_TEXT = "SELECCIONE UNA OPCIÓN DE CATÁLOGO"
 
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
-def obtener_precio_oro():
+def obtener_precio_oro() -> Tuple[float, str]:
     """
     Obtiene el precio actual del oro (XAU/USD) por onza desde la API.
     Retorna (precio, estado) donde estado es "live" o "fallback".
@@ -65,6 +66,50 @@ def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: f
     valor_gramo = (valor_onza / 31.1035) * pureza_factor
     monto_total = valor_gramo * peso_gramos
     return valor_gramo, monto_total
+
+def limpiar_valor_ancho(valor_ancho: str) -> str:
+    """Limpia el valor del ancho, quitando 'MM', 'MM.' o espacios extra, dejando solo el número."""
+    if pd.isna(valor_ancho) or not str(valor_ancho).strip():
+        return ""
+    
+    # 1. Eliminar 'MM', 'MM.', 'MM ' o ' MM' (mayúsculas o minúsculas)
+    limpio = re.sub(r'\s*MM\s*\.?\s*$', '', str(valor_ancho).strip(), flags=re.IGNORECASE)
+    # 2. Quitar el sufijo de milímetros que puede venir pegado o con punto.
+    limpio = re.sub(r'MM\.?$', '', limpio, flags=re.IGNORECASE).strip()
+    
+    return limpio.upper()
+
+
+# ------------------------------------------------------------------------------------------------
+# 🚨 FUNCIÓN CORREGIDA PARA EL MANEJO DE FOTOS 🚨
+# ------------------------------------------------------------------------------------------------
+def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
+    """
+    Extrae solo el nombre del archivo del path, limpia codificación URL y 
+    normaliza el nombre para que funcione como estático (espacios a guiones bajos).
+    """
+    if pd.isna(ruta_completa) or not str(ruta_completa).strip():
+        return "placeholder.png"
+    
+    ruta_limpia = str(ruta_completa).replace('\\', '/').strip()
+    
+    # Intenta decodificar URL (%20, etc.)
+    ruta_limpia = unquote(ruta_limpia)
+    
+    # Extraer el nombre del archivo al final de la ruta
+    match = re.search(r'[^/\\?#]+$', ruta_limpia)
+    if match:
+        nombre_archivo = match.group(0).strip()
+    else:
+        nombre_archivo = ruta_limpia.strip()
+
+    # **CLAVE para Flask:** Reemplazar espacios por guiones bajos para nombres de archivos estáticos.
+    nombre_normalizado = nombre_archivo.strip().replace(' ', '_') 
+    
+    # Asegurar que la extensión se mantenga.
+    return nombre_normalizado
+# ------------------------------------------------------------------------------------------------
+
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -128,48 +173,6 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame()
     
-
-def limpiar_valor_ancho(valor_ancho: str) -> str:
-    """Limpia el valor del ancho, quitando 'MM', 'MM.' o espacios extra, dejando solo el número."""
-    if pd.isna(valor_ancho) or not str(valor_ancho).strip():
-        return ""
-    
-    # 1. Eliminar 'MM', 'MM.', 'MM ' o ' MM' (mayúsculas o minúsculas)
-    limpio = re.sub(r'\s*MM\s*\.?\s*$', '', str(valor_ancho).strip(), flags=re.IGNORECASE)
-    # 2. Quitar el sufijo de milímetros que puede venir pegado o con punto.
-    limpio = re.sub(r'MM\.?$', '', limpio, flags=re.IGNORECASE).strip()
-    
-    return limpio.upper()
-
-def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-    """
-    Extrae solo el nombre del archivo del path, limpia codificación URL y 
-    normaliza el nombre para que funcione como estático.
-    """
-    if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        return "placeholder.png"
-    
-    ruta_limpia = str(ruta_completa).replace('\\', '/').strip()
-    
-    # Intenta decodificar URL (%20, etc.)
-    try:
-        from urllib.parse import unquote
-        ruta_limpia = unquote(ruta_limpia)
-    except ImportError:
-        ruta_limpia = ruta_limpia.replace('%20', ' ')
-    
-    # Extraer el nombre del archivo al final de la ruta
-    match = re.search(r'[^/\\?#]+$', ruta_limpia)
-    if match:
-        nombre_archivo = match.group(0).strip()
-    else:
-        nombre_archivo = ruta_limpia.strip()
-
-    # **CLAVE para Flask:** Reemplazar espacios por guiones bajos para nombres de archivos estáticos.
-    nombre_normalizado = nombre_archivo.strip().replace(' ', '_') 
-    
-    # Asegurar que la extensión se mantenga. 
-    return nombre_normalizado
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
     """Busca peso y costos fijo/adicional."""
@@ -642,7 +645,7 @@ def catalogo():
         catalogo_items.append({
             "modelo": modelo,
             "metal": metal,
-            # Asegurar que el nombre del archivo se extraiga y limpie correctamente
+            # Obtener el nombre de archivo limpio y estático
             "nombre_foto": obtener_nombre_archivo_imagen(ruta_foto) 
         })
 
@@ -731,6 +734,9 @@ def catalogo():
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
     """
     
+    # ------------------------------------------------------------------------------------------------
+    # 🚨 LÓGICA DE GENERACIÓN DE TARJETAS CORREGIDA PARA LAS FOTOS 🚨
+    # ------------------------------------------------------------------------------------------------
     for item in catalogo_items:
         modelo = item['modelo']
         metal = item['metal']
@@ -785,6 +791,7 @@ def catalogo():
                         </div>
                     </div>
                     """
+    # ------------------------------------------------------------------------------------------------
 
     html_catalogo += """
                 </div>
