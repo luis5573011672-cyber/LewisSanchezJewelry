@@ -163,7 +163,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
-    """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
+#    """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
