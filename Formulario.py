@@ -155,7 +155,8 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     
     if not df_global.loc[filtro_base].empty:
         base_fila = df_global.loc[filtro_base].iloc[0]
-        peso_raw = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0))
+        # Usamos PESO, que es el peso base del modelo sin ajuste por talla.
+        peso_raw = base_fila.get("PESO", 0) 
         price_cost_raw = base_fila.get("PRICE COST", 0) 
         ct_raw = base_fila.get("CT", 0) 
         
@@ -190,9 +191,9 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # --- 0. Obtener MONTO de la hoja SIZE (CORREGIDO: Columna F, Fila 3 -> Índice 1 de los datos) ---
+    # --- 0. Obtener MONTO de la hoja SIZE (Columna F, Fila 3 -> Índice 1 de los datos) ---
     monto_f3_diamante = 0.0
-    # Asegurarse de que la columna exista con el nombre "MONTO" (ya sea que era "MONTO" o "MONTO F3" y fue renombrada)
+    # Asegurarse de que la columna exista con el nombre "MONTO"
     if not df_adicional.empty and "MONTO" in df_adicional.columns: 
         try:
             # Índice 1 corresponde a la tercera fila del Excel (F3)
@@ -343,40 +344,57 @@ def formulario():
             talla_cab = tallas_c[0]
             session["talla_cab"] = talla_cab 
 
-    # --- 7. Cálculos (El cálculo del oro por Kilate es correcto) ---
+    # --- 7. Cálculos (AJUSTE CRUCIAL DEL PESO POR KILATAJE) ---
     
-    # Dama
-    peso_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
+    # --- Dama ---
+    peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     monto_diamantes_dama = 0.0 
-    
-    if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
-        # El cálculo del monto del oro aquí ya se ajusta correctamente con el factor de pureza del Kilate.
-        _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0.0), peso_dama)
+    peso_ajustado_dama = 0.0 # Valor para mostrar el peso ajustado (Oro Puro)
+
+    if peso_base_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         
-        # Calcular monto de diamantes 
+        factor_pureza_dama = FACTOR_KILATES.get(kilates_dama, 0.0)
+        
+        # 1. Ajustar el peso para visualización (Peso Base * Factor Pureza)
+        peso_ajustado_dama = peso_base_dama * factor_pureza_dama
+        
+        # 2. Calcular el valor del oro (usando peso base y factor de pureza)
+        _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
+        
+        # 3. Calcular monto de diamantes 
         if ct_dama > 0 and monto_f3_diamante > 0:
             monto_diamantes_dama = ct_dama * monto_f3_diamante
         else:
             monto_diamantes_dama = 0.0
 
+        # 4. Monto Total Dama
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
 
-    # Caballero
-    peso_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
+    # --- Caballero ---
+    peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     monto_diamantes_cab = 0.0 
+    peso_ajustado_cab = 0.0 # Valor para mostrar el peso ajustado (Oro Puro)
     
-    if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
-        _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0.0), peso_cab)
+    if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         
-        # Calcular monto de diamantes 
+        factor_pureza_cab = FACTOR_KILATES.get(kilates_cab, 0.0)
+        
+        # 1. Ajustar el peso para visualización (Peso Base * Factor Pureza)
+        peso_ajustado_cab = peso_base_cab * factor_pureza_cab
+        
+        # 2. Calcular el valor del oro
+        _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
+        
+        # 3. Calcular monto de diamantes 
         if ct_cab > 0 and monto_f3_diamante > 0:
             monto_diamantes_cab = ct_cab * monto_f3_diamante
         else:
             monto_diamantes_cab = 0.0
 
+        # 4. Monto Total Caballero
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab 
         monto_total_bruto += monto_cab
         
@@ -386,6 +404,21 @@ def formulario():
     logo_url = url_for('static', filename='logo.png')
 
 
+    # Detalle de diamantes para mostrar
+    detalle_dama = (
+        f' (Peso Base: {peso_base_dama:,.2f}g, '
+        f'Peso Oro Puro ({kilates_dama}K): {peso_ajustado_dama:,.2f}g, ' # Peso ajustado se actualiza con Kilates
+        f'Add: ${cost_adicional_dama:,.2f}, CT: {ct_dama:,.3f}, '
+        f'Diamantes: ${monto_diamantes_dama:,.2f})'
+    )
+        
+    detalle_cab = (
+        f' (Peso Base: {peso_base_cab:,.2f}g, '
+        f'Peso Oro Puro ({kilates_cab}K): {peso_ajustado_cab:,.2f}g, ' # Peso ajustado se actualiza con Kilates
+        f'Add: ${cost_adicional_cab:,.2f}, CT: {ct_cab:,.3f}, '
+        f'Diamantes: ${monto_diamantes_cab:,.2f})'
+    )
+    
     # --------------------- Generación del HTML para el Formulario ---------------------
         
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
@@ -431,11 +464,6 @@ def formulario():
     
     precio_oro_status = f"Precio Oro Onza: ${precio_onza:,.2f} USD ({status.upper()})"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
-    
-    # Detalle de diamantes para mostrar
-    detalle_dama = f' (Peso: {peso_dama:,.2f}g, Add: ${cost_adicional_dama:,.2f}, CT: {ct_dama:,.3f}, Diamantes: ${monto_diamantes_dama:,.2f})'
-        
-    detalle_cab = f' (Peso: {peso_cab:,.2f}g, Add: ${cost_adicional_cab:,.2f}, CT: {ct_cab:,.3f}, Diamantes: ${monto_diamantes_cab:,.2f})'
     
     html_form = f"""
     <!DOCTYPE html>
@@ -484,7 +512,7 @@ def formulario():
             
             <form method="POST" action="/" class="space-y-4"> 
                 <div class="header-content">
-                    <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
+                    <img src="{url_for('static', filename='logo.png')}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                     <div class="title-group">
                         <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
                     </div>
