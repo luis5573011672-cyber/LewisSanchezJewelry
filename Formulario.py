@@ -94,7 +94,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_adicional.columns = new_columns_adicional
         
         # 3. Limpieza de valores clave
-        for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO"]: 
+        for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO", "CT"]: 
             if col in df.columns:
                 if col == "ANCHO":
                      # Limpiar el valor de ANCHO eliminando 'MM'
@@ -102,7 +102,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
                 else:
                     df[col] = df[col].astype(str).str.strip()
             
-        for col in ["SIZE", "ADICIONAL"]: 
+        for col in ["SIZE", "ADICIONAL", "MONTO F3"]: # <<< MODIFICACIÓN: Agregar MONTO F3
             if col in df_adicional.columns:
                 df_adicional[col] = df_adicional[col].astype(str).str.strip()
         
@@ -132,16 +132,16 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     # Importante: El nombre debe coincidir EXACTAMENTE (case-sensitive) con el archivo en static/
     return nombre_archivo_final
 
-def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float]:
-    """Busca peso y costos fijo/adicional en los DataFrames."""
+def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: # <<< MODIFICACIÓN: Nuevo retorno para 'ct'
+    """Busca peso, costos fijo/adicional y CT en los DataFrames."""
     
     global df_global 
     
     # La condición debe ser estricta para asegurar que el cálculo se hace solo con datos válidos
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
-        return 0.0, 0.0, 0.0 
+        return 0.0, 0.0, 0.0, 0.0 # <<< MODIFICACIÓN: Añadir 0.0 para CT
         
-    # 1. Buscar el PESO y COSTO FIJO en df_global (WEDDING BANDS)
+    # 1. Buscar el PESO, COSTO FIJO y CT en df_global (WEDDING BANDS)
     filtro_base = (df_global["NAME"] == modelo) & \
                   (df_global["ANCHO"] == ancho) & \
                   (df_global["METAL"] == metal) & \
@@ -149,15 +149,21 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     
     peso = 0.0
     price_cost = 0.0 # Costo Fijo
+    ct = 0.0 # <<< MODIFICACIÓN: Inicializar CT
     
     if not df_global.loc[filtro_base].empty:
         base_fila = df_global.loc[filtro_base].iloc[0]
         peso_raw = base_fila.get("PESO_AJUSTADO", base_fila.get("PESO", 0))
         price_cost_raw = base_fila.get("PRICE COST", 0) 
+        ct_raw = base_fila.get("CT", 0) # <<< MODIFICACIÓN: Obtener CT
+        
         try: peso = float(peso_raw)
         except: peso = 0.0
         try: price_cost = float(price_cost_raw)
         except: price_cost = 0.0
+        try: ct = float(ct_raw) # <<< MODIFICACIÓN: Convertir CT a float
+        except: ct = 0.0
+
 
     # 2. Buscar el COSTO ADICIONAL en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
@@ -170,7 +176,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
             try: cost_adicional = float(cost_adicional_raw)
             except: cost_adicional = 0.0
 
-    return peso, price_cost, cost_adicional
+    return peso, price_cost, cost_adicional, ct # <<< MODIFICACIÓN: Retornar CT
 
 # --------------------- RUTAS FLASK ---------------------
 
@@ -182,7 +188,19 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # --- 1. Definición de Textos y Carga de Idioma ---
+    # --- 0. Obtener MONTO F3 de la hoja SIZE (Solo se usa el primer valor encontrado) ---
+    monto_f3_diamante = 0.0
+    if not df_adicional.empty and "MONTO F3" in df_adicional.columns:
+        try:
+            # Buscar el primer valor válido de MONTO F3
+            monto_f3_raw = df_adicional.loc[df_adicional["MONTO F3"].str.strip() != "", "MONTO F3"].iloc[0]
+            monto_f3_diamante = float(monto_f3_raw)
+        except Exception as e:
+            logging.warning(f"No se pudo obtener/convertir MONTO F3 de la hoja SIZE: {e}")
+            monto_f3_diamante = 0.0 # Usar 0 si falla
+
+    
+    # --- 1. Definición de Textos y Carga de Idioma (SIN CAMBIOS) ---
     
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     session["idioma"] = idioma 
@@ -204,8 +222,26 @@ def formulario():
         "email": "Email de Contacto" if es else "Contact Email",
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
-
-    # --- 2. Carga de Variables de SESIÓN (GET) o POST (Actualización) ---
+    
+    # --- 3. Manejo de Inicio Fresco o Reseteo Completo (GET sin datos) (SIN CAMBIOS) ---
+    is_initial_load = request.method == "GET" and session.get("modelo_dama") is None
+    
+    if is_initial_load:
+        session["nombre_cliente"] = ""
+        session["email_cliente"] = ""
+        session["modelo_dama"] = t['seleccionar'].upper()
+        session["metal_dama"] = ""
+        session["modelo_cab"] = t['seleccionar'].upper()
+        session["metal_cab"] = ""
+        session["kilates_dama"] = "14" 
+        session["kilates_cab"] = "14"
+        session["ancho_dama"] = ""
+        session["talla_dama"] = ""
+        session["ancho_cab"] = ""
+        session["talla_cab"] = ""
+    
+    
+    # --- 2. Carga de Variables de SESIÓN (GET) o POST (Actualización) (SIN CAMBIOS) ---
     
     # Datos del Cliente
     nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", "")) 
@@ -226,24 +262,7 @@ def formulario():
     metal_cab = session.get("metal_cab", "").upper()
     
     
-    # --- 3. Manejo de Inicio Fresco o Reseteo Completo (GET sin datos) ---
-    is_root_get = request.method == "GET" and not request.args.get("fresh_selection")
-    if is_root_get and session.get("modelo_dama") is None:
-        # Inicializar solo las selecciones del anillo
-        session["modelo_dama"] = t['seleccionar'].upper()
-        session["metal_dama"] = ""
-        session["modelo_cab"] = t['seleccionar'].upper()
-        session["metal_cab"] = ""
-        session["kilates_dama"] = "14"
-        session["kilates_cab"] = "14"
-        # Recargar variables locales
-        modelo_dama = t['seleccionar'].upper()
-        modelo_cab = t['seleccionar'].upper()
-    
-    
-    # --- 4. Persistir los valores LEÍDOS del GET/POST en la SESIÓN ---
-    # Esto es CRUCIAL para que los cambios hechos en el POST (ej. kilates) 
-    # se mantengan en el siguiente GET o POST.
+    # --- 4. Persistir los valores LEÍDOS del GET/POST en la SESIÓN (SIN CAMBIOS) ---
     session["nombre_cliente"] = nombre_cliente 
     session["email_cliente"] = email_cliente 
     session["kilates_dama"] = kilates_dama
@@ -252,29 +271,26 @@ def formulario():
     session["kilates_cab"] = kilates_cab
     session["ancho_cab"] = ancho_cab
     session["talla_cab"] = talla_cab
-    # El modelo y metal se manejan solo desde /catalogo
 
     # Manejo del cambio de idioma (Redirección para actualizar textos)
     if request.method == "POST" and "idioma" in request.form:
          return redirect(url_for("formulario"))
         
     
-    # --- 5. Manejo de Regreso de Catálogo (GET con fresh_selection) ---
+    # --- 5. Manejo de Regreso de Catálogo (GET con fresh_selection) (SIN CAMBIOS) ---
     fresh_selection = request.args.get("fresh_selection")
     if fresh_selection:
-        # Si venimos del catálogo, las variables locales ya se leyeron del POST/GET, 
-        # pero forzamos el reseteo de Ancho y Talla para la autoselección
         ancho_dama = ""
         talla_dama = ""
         ancho_cab = ""
         talla_cab = ""
-        session["ancho_dama"] = "" # Persistir el reseteo
+        session["ancho_dama"] = "" 
         session["talla_dama"] = ""
         session["ancho_cab"] = ""
         session["talla_cab"] = ""
 
 
-    # --- 6. Opciones disponibles y Forzar selección de Ancho/Talla por defecto ---
+    # --- 6. Opciones disponibles y Forzar selección de Ancho/Talla por defecto (SIN CAMBIOS) ---
     def get_options(modelo):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
             return [], []
@@ -315,19 +331,36 @@ def formulario():
             talla_cab = tallas_c[0]
             session["talla_cab"] = talla_cab 
 
-    # --- 7. Cálculos ---
-    peso_dama, cost_fijo_dama, cost_adicional_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
+    # --- 7. Cálculos (MODIFICADO) ---
+    
+    # Dama
+    peso_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
+    monto_diamantes_dama = 0.0 # Nuevo
+    
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0.0), peso_dama)
-        monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama 
+        
+        # Calcular monto de diamantes
+        if ct_dama > 0 and monto_f3_diamante > 0:
+            monto_diamantes_dama = ct_dama * monto_f3_diamante
+
+        monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama # Sumar diamantes
         monto_total_bruto += monto_dama
 
-    peso_cab, cost_fijo_cab, cost_adicional_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
+    # Caballero
+    peso_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
+    monto_diamantes_cab = 0.0 # Nuevo
+    
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0.0), peso_cab)
-        monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab
+        
+        # Calcular monto de diamantes
+        if ct_cab > 0 and monto_f3_diamante > 0:
+            monto_diamantes_cab = ct_cab * monto_f3_diamante
+
+        monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab # Sumar diamantes
         monto_total_bruto += monto_cab
         
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
@@ -336,7 +369,7 @@ def formulario():
     logo_url = url_for('static', filename='logo.png')
 
 
-    # --------------------- Generación del HTML para el Formulario ---------------------
+    # --------------------- Generación del HTML para el Formulario (Modificado para mostrar CT) ---------------------
         
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
@@ -382,6 +415,19 @@ def formulario():
     
     precio_oro_status = f"Precio Oro Onza: ${precio_onza:,.2f} USD ({status.upper()})"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
+    
+    # Detalle de diamantes para mostrar
+    detalle_dama = f' (Peso: {peso_dama:,.2f}g, Add: ${cost_adicional_dama:,.2f}'
+    if ct_dama > 0:
+        detalle_dama += f', CT: {ct_dama:,.3f}, Diamantes: ${monto_diamantes_dama:,.2f})'
+    else:
+        detalle_dama += ')'
+        
+    detalle_cab = f' (Peso: {peso_cab:,.2f}g, Add: ${cost_adicional_cab:,.2f}'
+    if ct_cab > 0:
+        detalle_cab += f', CT: {ct_cab:,.3f}, Diamantes: ${monto_diamantes_cab:,.2f})'
+    else:
+        detalle_cab += ')'
     
     html_form = f"""
     <!DOCTYPE html>
@@ -466,7 +512,7 @@ def formulario():
                     </p>
                     {selectores_dama}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD (Peso: ' + f'{peso_dama:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_dama:,.2f}' + ')' if monto_dama > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD' + detalle_dama if monto_dama > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
@@ -478,7 +524,7 @@ def formulario():
                     </p>
                     {selectores_cab}
                     <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD (Peso: ' + f'{peso_cab:,.2f}' + 'g, Adicional: $' + f'{cost_adicional_cab:,.2f}' + ')' if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                        {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
 
