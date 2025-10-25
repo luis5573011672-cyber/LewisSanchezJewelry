@@ -158,8 +158,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 
     return peso, price_cost, cost_adicional, ct 
 
-# --------------------- RUTAS FLASK ---------------------
----
+# --------------------- RUTAS FLASK ------------------------
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
