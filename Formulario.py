@@ -103,9 +103,13 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
                 else:
                     df[col] = df[col].astype(str).str.strip()
             
-        for col in ["SIZE", "ADICIONAL", "MONTO F3"]: 
-            if col in df_adicional.columns:
-                df_adicional[col] = df_adicional[col].astype(str).str.strip()
+        # 4. Limpieza de columnas clave en SIZE (Añadido MONTO)
+        for col_name in ["SIZE", "ADICIONAL", "MONTO F3", "MONTO"]: 
+            if col_name in df_adicional.columns:
+                df_adicional[col_name] = df_adicional[col_name].astype(str).str.strip()
+            # Renombrar MONTO F3 a MONTO si existe, para unificar
+            if "MONTO F3" in df_adicional.columns and "MONTO" not in df_adicional.columns:
+                 df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
         df_global = df
         df_adicional_global = df_adicional
@@ -186,17 +190,25 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # --- 0. Obtener MONTO F3 de la hoja SIZE (MODIFICADO) ---
+    # --- 0. Obtener MONTO de la hoja SIZE (CORREGIDO: Columna F, Fila 3 -> Índice 1 de los datos) ---
     monto_f3_diamante = 0.0
-    if not df_adicional.empty and "MONTO F3" in df_adicional.columns:
+    # Asegurarse de que la columna exista con el nombre "MONTO" (ya sea que era "MONTO" o "MONTO F3" y fue renombrada)
+    if not df_adicional.empty and "MONTO" in df_adicional.columns: 
         try:
-            # Buscamos el primer valor no vacío de la columna MONTO F3. 
-            # Esto asume que el valor de F3 es el mismo para todas las filas o solo se necesita el primero.
-            monto_f3_raw = df_adicional.loc[df_adicional["MONTO F3"].str.strip() != "", "MONTO F3"].iloc[0]
-            monto_f3_diamante = float(monto_f3_raw)
+            # Índice 1 corresponde a la tercera fila del Excel (F3)
+            if len(df_adicional) > 1:
+                monto_f3_raw = df_adicional["MONTO"].iloc[1] 
+            elif len(df_adicional) > 0:
+                 # Caso de respaldo si solo hay una fila de datos
+                monto_f3_raw = df_adicional["MONTO"].iloc[0]
+            else:
+                monto_f3_raw = None
+
+            if pd.notna(monto_f3_raw) and str(monto_f3_raw).strip():
+                 monto_f3_diamante = float(str(monto_f3_raw).strip())
+            
         except Exception as e:
-            # Si la columna existe pero está vacía o no es convertible a float
-            logging.warning(f"No se pudo obtener/convertir MONTO F3 de la hoja SIZE (posiblemente la celda F3). Usando 0.0. Error: {e}")
+            logging.warning(f"Error al obtener/convertir el valor de MONTO (F3). Usando 0.0. Error: {e}")
             monto_f3_diamante = 0.0 
 
     
@@ -331,7 +343,7 @@ def formulario():
             talla_cab = tallas_c[0]
             session["talla_cab"] = talla_cab 
 
-    # --- 7. Cálculos (AJUSTE EN CÁLCULO DE DIAMANTES) ---
+    # --- 7. Cálculos (El cálculo del oro por Kilate es correcto) ---
     
     # Dama
     peso_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
@@ -339,13 +351,14 @@ def formulario():
     monto_diamantes_dama = 0.0 
     
     if peso_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
+        # El cálculo del monto del oro aquí ya se ajusta correctamente con el factor de pureza del Kilate.
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_dama, 0.0), peso_dama)
         
-        # Calcular monto de diamantes (Solo si hay CT y el factor de costo es mayor a 0)
+        # Calcular monto de diamantes 
         if ct_dama > 0 and monto_f3_diamante > 0:
             monto_diamantes_dama = ct_dama * monto_f3_diamante
         else:
-            monto_diamantes_dama = 0.0 # Asegurar 0 si no hay CT o costo
+            monto_diamantes_dama = 0.0
 
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
@@ -358,11 +371,11 @@ def formulario():
     if peso_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, FACTOR_KILATES.get(kilates_cab, 0.0), peso_cab)
         
-        # Calcular monto de diamantes (Solo si hay CT y el factor de costo es mayor a 0)
+        # Calcular monto de diamantes 
         if ct_cab > 0 and monto_f3_diamante > 0:
             monto_diamantes_cab = ct_cab * monto_f3_diamante
         else:
-            monto_diamantes_cab = 0.0 # Asegurar 0 si no hay CT o costo
+            monto_diamantes_cab = 0.0
 
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab 
         monto_total_bruto += monto_cab
@@ -373,7 +386,7 @@ def formulario():
     logo_url = url_for('static', filename='logo.png')
 
 
-    # --------------------- Generación del HTML para el Formulario (Modificado para mostrar CT) ---------------------
+    # --------------------- Generación del HTML para el Formulario ---------------------
         
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
@@ -572,9 +585,7 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    """Ruta del catálogo: selecciona Modelo y Metal. 
-    Permite múltiples selecciones (Dama y Caballero) antes de regresar al formulario.
-    """
+    """Ruta del catálogo: selecciona Modelo y Metal."""
     df, _ = cargar_datos()
     
     mensaje_exito = None
