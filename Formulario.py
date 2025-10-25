@@ -16,14 +16,14 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
 EXCEL_PATH = "Formulario Catalogo.xlsm" 
-# Factores de pureza (Kilates / 24) - NECESARIOS para calcular el VALOR monetario del oro.
+# Factores de pureza (Kilates / 24)
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 
 # Variables globales para los DataFrames (Caché)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
-costos_diamantes_global = {} # Nuevo caché para los costos de diamantes
+costos_diamantes_global = {} 
 
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
@@ -50,13 +50,11 @@ def obtener_precio_oro() -> Tuple[float, str]:
 def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
     """
     Calcula el valor del gramo de la aleación y el monto total de oro de la joya.
-    peso_gramos es el PESO total de la joya obtenido de la columna 'PESO'.
     """
     if valor_onza <= 0 or peso_gramos <= 0 or pureza_factor <= 0:
         return 0.0, 0.0
     
-    # Onza Troy (31.1035 gramos)
-    valor_gramo_puro = valor_onza / 31.1035
+    valor_gramo_puro = valor_onza / 31.1035 # Onza Troy (31.1035 gramos)
     valor_gramo_aleacion = valor_gramo_puro * pureza_factor
     monto_total = valor_gramo_aleacion * peso_gramos
     
@@ -69,15 +67,26 @@ def calcular_monto_aproximado(monto_bruto: float) -> float:
     aproximado = math.ceil(monto_bruto / 10.0) * 10.0
     return aproximado
 
+def safe_float(value) -> float:
+    """Intenta convertir un valor a float de manera segura, retornando 0.0 en caso de error."""
+    try:
+        if pd.notna(value) and str(value).strip():
+            return float(str(value).strip())
+    except:
+        pass
+    return 0.0
+
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
     """Carga los DataFrames con manejo de caché y limpieza de columnas, y extrae costos de diamante."""
     global df_global, df_adicional_global, costos_diamantes_global
+    
+    # 1. Usar caché si ya está cargado para prevenir re-lecturas (ayuda con 502)
     if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global:
         return df_global, df_adicional_global, costos_diamantes_global
 
     costos_diamantes = {"laboratorio": 0.0, "natural": 0.0}
     try:
-        # 1. Cargar la hoja WEDDING BANDS
+        # 2. Cargar la hoja WEDDING BANDS
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         df = df_raw.iloc[2:].copy()
@@ -85,43 +94,34 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
         if 'WIDTH' in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
-        # 2. Cargar la hoja SIZE
+        # 3. Cargar la hoja SIZE (usamos header=None para acceder por índice numérico si es necesario)
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
-        # Re-leer la hoja SIZE considerando que la fila 0 es el encabezado y la 1 tiene los valores
+        # Identificar encabezados para el df procesado
         df_adicional_headers = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = df_adicional_headers
         
-        # 3. Extracción de Costos de Diamantes (LABORATORIO y NATURAL)
+        # 4. Extracción de Costos de Diamantes (Laboratorio y Natural)
         
-        # El costo existente de Laboratorio es la columna MONTO F3 / MONTO, Fila 2 (índice 1 de datos)
+        # Costo Laboratorio: Columna MONTO F3 / MONTO. Asumimos Fila 2 de datos (índice 1 del df_adicional procesado)
         if "MONTO F3" in df_adicional_headers:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
         monto_laboratorio_raw = None
         if "MONTO" in df_adicional.columns and len(df_adicional) > 1:
             monto_laboratorio_raw = df_adicional["MONTO"].iloc[1]
-
-        # El costo solicitado de Natural es la columna F, Fila 2 (índice de columna 5, índice de fila 1 de datos)
-        # Si no tiene encabezado 'F', accedemos por índice numérico (5)
-        
-        # Accedemos directamente por índice [1, 5] en el df_adicional_raw original sin encabezados para mayor seguridad
+            
+        # Costo Natural: Columna F (índice 5), Fila 2 (índice 2 del df_adicional_raw, o índice 1 del df_adicional)
+        # Usaremos el índice numérico [2, 5] en df_adicional_raw para mayor seguridad (Fila 3, Columna F del Excel)
         monto_natural_raw = None
         if len(df_adicional_raw) > 2 and len(df_adicional_raw.columns) > 5:
-            monto_natural_raw = df_adicional_raw.iloc[2, 5] # Fila 2 (índice 2) de la raw, Columna F (índice 5)
+            # Fila 3 del Excel (índice 2 en pandas), Columna F del Excel (índice 5 en pandas)
+            monto_natural_raw = df_adicional_raw.iloc[2, 5] 
         
-        def safe_float(value):
-            try:
-                if pd.notna(value) and str(value).strip():
-                    return float(str(value).strip())
-            except:
-                pass
-            return 0.0
-            
         costos_diamantes["laboratorio"] = safe_float(monto_laboratorio_raw)
         costos_diamantes["natural"] = safe_float(monto_natural_raw)
         
-        # 4. Limpieza y estandarización de columnas clave, incluyendo CARAT.
+        # 5. Limpieza y estandarización
         cols_to_strip = ["NAME", "METAL", "RUTA FOTO", "PESO", "GENERO", "CT", "ANCHO", "CARAT"] 
         for col in cols_to_strip:
             if col in df.columns:
@@ -136,6 +136,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
         return df, df_adicional, costos_diamantes
         
     except Exception as e:
+        # Esto ayuda a diagnosticar el 502 si es por un error de Python
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame(), costos_diamantes
 
@@ -167,34 +168,23 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
         price_cost_raw = base_fila.get("PRICE COST", 0) 
         ct_raw = base_fila.get("CT", 0) 
         
-        try: peso = float(peso_raw)
-        except: peso = 0.0
-        try: price_cost = float(price_cost_raw)
-        except: price_cost = 0.0
-        try: ct = float(ct_raw) 
-        except: ct = 0.0
+        peso = safe_float(peso_raw)
+        price_cost = safe_float(price_cost_raw)
+        ct = safe_float(ct_raw)
 
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns and "ADICIONAL" in df_adicional_local.columns:
         
-        # Pre-procesamiento de la columna SIZE para asegurar la comparación con la talla de entrada (talla)
         if "SIZE_STRIP" not in df_adicional_local.columns:
             df_adicional_local["SIZE_STRIP"] = df_adicional_local["SIZE"].astype(str).str.strip()
             
-        # Filtrar por la talla exacta seleccionada (talla)
         filtro_adicional = (df_adicional_local["SIZE_STRIP"] == talla) 
         
         if not df_adicional_local.loc[filtro_adicional].empty:
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
-            cost_adicional_raw = adicional_fila.get("ADICIONAL") # Obtener el valor de la columna 'ADICIONAL'
-            
-            try: 
-                # Intentamos convertir el valor a float de manera segura
-                cost_adicional = float(cost_adicional_raw)
-            except (ValueError, TypeError): 
-                # Si falla (ej. valor es NaN, None, o una cadena no numérica), el costo es 0
-                cost_adicional = 0.0
+            cost_adicional_raw = adicional_fila.get("ADICIONAL") 
+            cost_adicional = safe_float(cost_adicional_raw)
 
     return peso, price_cost, cost_adicional, ct 
 
@@ -265,7 +255,7 @@ def formulario():
     session["talla_cab"] = talla_cab
     session["tipo_diamante_cab"] = tipo_diamante_cab
     
-    if request.method == "POST" and "idioma" in request.form:
+    if request.method == "POST" and "idioma" in request.form and "volver_btn" not in request.form:
          return redirect(url_for("formulario"))
         
     fresh_selection = request.args.get("fresh_selection")
@@ -279,19 +269,16 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
 
-    # --- Opciones disponibles y Autoselección (Mantenida) ---
+    # --- Opciones disponibles y Autoselección ---
     def get_options(modelo, metal):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal:
             return [], []
         
-        # ... (Lógica de get_options sin cambios) ...
         filtro_base_options = (df["NAME"] == modelo) & (df["METAL"] == metal)
         
         def sort_numeric_key(value_str):
-            try:
-                return float(value_str)
-            except ValueError:
-                return float('inf') 
+            try: return float(value_str)
+            except ValueError: return float('inf') 
                 
         anchos_raw = df.loc[filtro_base_options, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric_key)
@@ -304,7 +291,6 @@ def formulario():
     anchos_d, tallas_d = get_options(modelo_dama, metal_dama)
     anchos_c, tallas_c = get_options(modelo_cab, metal_cab)
 
-    # Autoselección de Ancho y Talla si están vacíos
     def auto_select(tipo, modelo, anchos, tallas):
         nonlocal ancho_dama, talla_dama, ancho_cab, talla_cab
         if modelo != t['seleccionar'].upper():
@@ -338,22 +324,18 @@ def formulario():
         
         factor_pureza_dama = FACTOR_KILATES.get(kilates_dama, 0.0)
         
-        # 2a. Selección del Costo de Diamante Dama
         if tipo_diamante_dama == "Natural":
             costo_diamante_dama_final = monto_f3_diamante_natural
-        else: # Default a Laboratorio
+        else:
             costo_diamante_dama_final = monto_f3_diamante_laboratorio
 
-        # Calculamos el valor del oro
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
         
-        # Calcular monto de diamantes usando el costo seleccionado
         if ct_dama > 0 and costo_diamante_dama_final > 0:
             monto_diamantes_dama = ct_dama * costo_diamante_dama_final
         else:
             monto_diamantes_dama = 0.0
 
-        # Monto Total Dama = Valor Oro + Costo Fijo + Costo Adicional Talla + Costo Diamantes
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
 
@@ -367,22 +349,18 @@ def formulario():
         
         factor_pureza_cab = FACTOR_KILATES.get(kilates_cab, 0.0)
 
-        # 2b. Selección del Costo de Diamante Caballero
         if tipo_diamante_cab == "Natural":
             costo_diamante_cab_final = monto_f3_diamante_natural
-        else: # Default a Laboratorio
+        else:
             costo_diamante_cab_final = monto_f3_diamante_laboratorio
         
-        # Calculamos el valor del oro
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
         
-        # Calcular monto de diamantes usando el costo seleccionado
         if ct_cab > 0 and costo_diamante_cab_final > 0:
             monto_diamantes_cab = ct_cab * costo_diamante_cab_final
         else:
             monto_diamantes_cab = 0.0
 
-        # Monto Total Caballero = Valor Oro + Costo Fijo + Costo Adicional Talla + Costo Diamantes
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab 
         monto_total_bruto += monto_cab
         
@@ -429,7 +407,6 @@ def formulario():
         
         if modelo == t['seleccionar'].upper() or not metal:
             warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo y metal en el Catálogo para habilitar opciones.</p>'
-            # Se muestra el selector de kilates y diamante incluso si no hay modelo, ya que son independientes
             return f"""
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
                     {kilates_selector}
@@ -439,7 +416,6 @@ def formulario():
             """
 
         if not anchos or not tallas:
-            # Manejo de error si faltan anchos o tallas para la combinación.
             html_ancho_talla = f'<div class="w-full md:w-1/2"><p class="text-red-500 pt-3">No hay opciones de Ancho/Talla disponibles para esta combinación de Metal.</p></div>'
             return f"""
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
@@ -624,8 +600,13 @@ def formulario():
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
     """Ruta del catálogo: selecciona Modelo y Metal."""
-    df, _, _ = cargar_datos() # Actualizada para ignorar costos de diamante en esta ruta
-    
+    # Usamos try/except para cargar solo el DataFrame si es posible, sin fallar si el costo de diamante falla
+    try:
+        df, _, _ = cargar_datos() 
+    except Exception as e:
+        logging.error(f"Error cargando datos en catálogo: {e}")
+        df = pd.DataFrame()
+        
     mensaje_exito = None
     
     if request.method == "POST":
