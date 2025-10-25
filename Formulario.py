@@ -97,6 +97,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         if "ANCHO" in df.columns:
             df["ANCHO"] = df["ANCHO"].str.replace('MM', '', regex=False).str.strip()
 
+        # Asegurar que la columna de costo por diamante se llame MONTO
         if "MONTO F3" in df_adicional.columns and "MONTO" not in df_adicional.columns:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
@@ -147,20 +148,24 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
-    if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns:
-        # La columna que acompaña a la talla es 'ADICIONAL'
+    if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns and "ADICIONAL" in df_adicional_local.columns:
+        # Filtro por Talla (Size)
         filtro_adicional = (df_adicional_local["SIZE"] == talla) 
         
         if not df_adicional_local.loc[filtro_adicional].empty:
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
-            cost_adicional_raw = adicional_fila.get("ADICIONAL", 0) # Obtener el valor de la columna 'ADICIONAL'
-            try: cost_adicional = float(cost_adicional_raw)
-            except: cost_adicional = 0.0
+            cost_adicional_raw = adicional_fila.get("ADICIONAL") # Obtener el valor de la columna 'ADICIONAL'
+            
+            try: 
+                # Intentamos convertir el valor a float de manera segura
+                cost_adicional = float(cost_adicional_raw)
+            except (ValueError, TypeError): 
+                # Si falla (ej. si el valor es NaN o una cadena), el costo es 0
+                cost_adicional = 0.0
 
     return peso, price_cost, cost_adicional, ct 
 
 # --------------------- RUTAS FLASK ---------------------
-# La línea '---' fue eliminada o comentada aquí para evitar el SyntaxError.
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
@@ -174,11 +179,12 @@ def formulario():
     monto_f3_diamante = 0.0
     if not df_adicional.empty and "MONTO" in df_adicional.columns: 
         try:
+            # Asume que el valor MONTO está en la fila 1 o 0 de la hoja SIZE
             monto_f3_raw = df_adicional["MONTO"].iloc[1] if len(df_adicional) > 1 else (df_adicional["MONTO"].iloc[0] if len(df_adicional) > 0 else None)
             if pd.notna(monto_f3_raw) and str(monto_f3_raw).strip():
                  monto_f3_diamante = float(str(monto_f3_raw).strip())
-        except Exception as e:
-            logging.warning(f"Error al obtener/convertir el valor de MONTO (F3). Usando 0.0. Error: {e}")
+        except Exception:
+            monto_f3_diamante = 0.0
     
     # --- Carga de Idioma y Textos ---
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
@@ -286,10 +292,9 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- 2. Cálculos (Incluyendo el costo adicional por talla en ambos montos) ---
+    # --- 2. Cálculos (Ahora con la suma del costo adicional por talla confirmada) ---
     
     # --- Dama ---
-    # Usando el Kilataje como filtro para obtener el peso base EXACTO
     peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     monto_diamantes_dama = 0.0 
@@ -312,7 +317,6 @@ def formulario():
         monto_total_bruto += monto_dama
 
     # --- Caballero ---
-    # Usando el Kilataje como filtro para obtener el peso base EXACTO
     peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     monto_diamantes_cab = 0.0 
@@ -682,7 +686,24 @@ def catalogo():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>{t['titulo']}</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <style> /* Estilos omitidos */ </style>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+            body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
+            .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
+            .title-container {{
+                display: flex; 
+                align-items: center; 
+                justify-content: center;
+                margin-bottom: 2rem; 
+            }}
+            .logo-img {{ 
+                height: 60px; 
+                margin-right: 15px; 
+            }}
+            .selected-dama {{ border: 4px solid #EC4899; }} 
+            .selected-cab {{ border: 4px solid #3B82F6; }} 
+            .selected-both {{ border: 4px solid #10B981; }} 
+        </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
