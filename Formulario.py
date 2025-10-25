@@ -112,9 +112,10 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         if "MONTO" in df_adicional.columns and len(df_adicional) > 1:
             monto_laboratorio_raw = df_adicional["MONTO"].iloc[1]
             
-        # Costo Natural: Columna F, Fila 2 (índice 2 del df_adicional_raw sin encabezados, columna índice 5)
+        # Costo Natural: Columna F, Fila 2 (índice 1 de datos en el df_adicional procesado)
         monto_natural_raw = None
-        # Fila 2 (índice 2 en raw), Columna F (índice 5 en raw)
+        # Fila 2 (índice 1 en df_adicional), Columna F (índice 5 en df_adicional_raw si no hay cambios en columnas)
+        # Usamos df_adicional_raw.iloc[1, 5] para ser estrictos con la ubicación en Excel (Fila 2, Columna F)
         if len(df_adicional_raw) > 2 and len(df_adicional_raw.columns) > 5:
             monto_natural_raw = df_adicional_raw.iloc[1, 5] 
         
@@ -146,7 +147,6 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         
     except Exception as e:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
-        # Devolver DataFrames vacíos y costos 0.0 para que la aplicación no falle.
         return pd.DataFrame(), pd.DataFrame(), costos_diamantes, ct_cache_temp
 
 
@@ -228,7 +228,8 @@ def formulario():
         "cliente_datos": "Datos del Cliente",
         "nombre": "Nombre del Cliente",
         "email": "Email de Contacto",
-        "cambiar_idioma": "Cambiar Idioma"
+        "cambiar_idioma": "Cambiar Idioma",
+        "ir_catalogo": "Ir al Catálogo" # Nuevo texto
     }
     
     # Adaptar textos si el idioma no es español (para consistencia)
@@ -246,7 +247,8 @@ def formulario():
             "cliente_datos": "Client Details",
             "nombre": "Client Name",
             "email": "Contact Email",
-            "cambiar_idioma": "Change Language"
+            "cambiar_idioma": "Change Language",
+            "ir_catalogo": "Go to Catalog"
         })
 
 
@@ -256,7 +258,6 @@ def formulario():
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
-    # Mantenemos el tipo de diamante seleccionado, con Laboratorio como default
     tipo_diamante_dama = request.form.get("tipo_diamante_dama", session.get("tipo_diamante_dama", "Laboratorio"))
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
@@ -295,7 +296,7 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
 
-    # --- Opciones disponibles y Autoselección ---
+    # --- Opciones disponibles y Autoselección (Misma lógica) ---
     def get_options(modelo, metal):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal:
             return [], []
@@ -338,7 +339,7 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- 2. Cálculos (Aplicando Tipo de Diamante) ---
+    # --- 2. Cálculos (Misma lógica de cálculo) ---
     
     # --- Dama ---
     peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper())
@@ -350,20 +351,17 @@ def formulario():
         
         factor_pureza_dama = FACTOR_KILATES.get(kilates_dama, 0.0)
         
-        # 2a. Selección del Costo de Diamante Dama
         if tipo_diamante_dama == "Natural":
             costo_diamante_dama_final = monto_f3_diamante_natural
-        else: # Default a Laboratorio
+        else:
             costo_diamante_dama_final = monto_f3_diamante_laboratorio
 
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
         
-        # Calcular monto de diamantes (solo si CT > 0)
         if ct_dama > 0 and costo_diamante_dama_final > 0:
             monto_diamantes_dama = ct_dama * costo_diamante_dama_final
         else:
             monto_diamantes_dama = 0.0
-            # Si CT es 0, no importa la selección, se resetea a Laboratorio
             tipo_diamante_dama = "Laboratorio"
             session["tipo_diamante_dama"] = "Laboratorio"
 
@@ -380,20 +378,17 @@ def formulario():
         
         factor_pureza_cab = FACTOR_KILATES.get(kilates_cab, 0.0)
 
-        # 2b. Selección del Costo de Diamante Caballero
         if tipo_diamante_cab == "Natural":
             costo_diamante_cab_final = monto_f3_diamante_natural
-        else: # Default a Laboratorio
+        else:
             costo_diamante_cab_final = monto_f3_diamante_laboratorio
         
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
         
-        # Calcular monto de diamantes (solo si CT > 0)
         if ct_cab > 0 and costo_diamante_cab_final > 0:
             monto_diamantes_cab = ct_cab * costo_diamante_cab_final
         else:
             monto_diamantes_cab = 0.0
-            # Si CT es 0, no importa la selección, se resetea a Laboratorio
             tipo_diamante_cab = "Laboratorio"
             session["tipo_diamante_cab"] = "Laboratorio"
 
@@ -402,7 +397,7 @@ def formulario():
         
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
     
-    # Detalle de cálculo para mostrar en la interfaz
+    # Detalle de cálculo para mostrar en la interfaz (Mismo formato)
     detalle_dama = (
         f' (Peso: {peso_base_dama:,.2f}g ({kilates_dama}K), '
         f'Add: ${cost_adicional_dama:,.2f}, CT: {ct_dama:,.3f}, '
@@ -417,7 +412,6 @@ def formulario():
         f'Subtotal Diamantes: ${monto_diamantes_cab:,.2f})'
     )
     
-    # --- Función para determinar si el selector de diamante debe mostrarse ---
     def should_show_diamond_selector(modelo, metal, ancho, kilates, genero):
         if modelo == t['seleccionar'].upper() or not metal or not ancho or not kilates:
             return False
@@ -446,7 +440,6 @@ def formulario():
         """
         
         diamante_selector = ""
-        # 1. Condición para mostrar el selector
         if mostrar_selector_diamante:
             diamante_selector = f"""
                 <div class="w-full md:w-1/4">
@@ -457,10 +450,7 @@ def formulario():
                 </div>
             """
         else:
-            # Selector oculto con valor por defecto, si CT es 0
              diamante_selector = f'<input type="hidden" name="tipo_diamante_{tipo}" value="Laboratorio">'
-        
-        selector_count = 3 + (1 if mostrar_selector_diamante else 0)
         
         if modelo == t['seleccionar'].upper() or not metal:
             warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo y metal en el Catálogo para habilitar opciones.</p>'
@@ -484,7 +474,6 @@ def formulario():
                 </div>
             """
 
-        # Estructura principal de selectores
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -587,6 +576,12 @@ def formulario():
                                class="w-full p-2 border border-gray-300 rounded-lg">
                     </div>
                 </div>
+                
+                <div class="pb-6"> 
+                    <a href="{url_for('catalogo')}" class="inline-block px-4 py-2 text-white bg-indigo-600 rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 text-sm font-semibold">
+                        {t['ir_catalogo']}
+                    </a>
+                </div>
                 <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
                 <div class="bg-pink-50 p-4 rounded-lg space-y-3">
                     <p class="text-sm font-medium text-gray-700">
@@ -610,10 +605,6 @@ def formulario():
                         {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 or ct_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                     </span>
                 </div>
-
-                <a href="{url_for('catalogo')}" class="inline-block px-4 py-2 text-white bg-indigo-600 rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 text-sm font-semibold">
-                    {t['catalogo_btn']} (Cambiar Modelo/Metal)
-                </a>
 
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
@@ -670,7 +661,8 @@ def catalogo():
         tipo = request.form.get("tipo")
         
         if request.form.get("volver_btn") == "true":
-            return redirect(url_for("formulario", fresh_selection=True))
+            # El parámetro fresh_selection=True asegura que se reintenten seleccionar ancho/talla
+            return redirect(url_for("formulario", fresh_selection=True)) 
         
         if seleccion and tipo:
             try:
@@ -864,5 +856,4 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == "__main__":
-    # Asegúrese de que 'Formulario Catalogo.xlsm' está en el mismo directorio.
     app.run(debug=True)
