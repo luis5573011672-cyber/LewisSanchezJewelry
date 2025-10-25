@@ -112,7 +112,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: 
     """
     Busca peso BASE, costos fijo/adicional (por talla) y CT.
-    El PESO ahora depende directamente del KILATAJE (CARAT) seleccionado.
+    Utiliza: NAME, ANCHO, METAL, CARAT, GENERO para encontrar el PESO.
     """
     
     global df_global 
@@ -148,21 +148,23 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns:
+        # La columna que acompaña a la talla es 'ADICIONAL'
         filtro_adicional = (df_adicional_local["SIZE"] == talla) 
         
         if not df_adicional_local.loc[filtro_adicional].empty:
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
-            cost_adicional_raw = adicional_fila.get("ADICIONAL", 0)
+            cost_adicional_raw = adicional_fila.get("ADICIONAL", 0) # Obtener el valor de la columna 'ADICIONAL'
             try: cost_adicional = float(cost_adicional_raw)
             except: cost_adicional = 0.0
 
     return peso, price_cost, cost_adicional, ct 
 
-# --------------------- RUTAS FLASK ------------------------
+# --------------------- RUTAS FLASK ---------------------
+# La línea '---' fue eliminada o comentada aquí para evitar el SyntaxError.
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
-#    """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
+    """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
     df, df_adicional = cargar_datos()
     precio_onza, status = obtener_precio_oro()
@@ -284,7 +286,7 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- Cálculos ---
+    # --- 2. Cálculos (Incluyendo el costo adicional por talla en ambos montos) ---
     
     # --- Dama ---
     # Usando el Kilataje como filtro para obtener el peso base EXACTO
@@ -305,6 +307,7 @@ def formulario():
         else:
             monto_diamantes_dama = 0.0
 
+        # Monto Total Dama = Valor Oro + Costo Fijo + Costo Adicional Talla + Costo Diamantes
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
 
@@ -327,6 +330,7 @@ def formulario():
         else:
             monto_diamantes_cab = 0.0
 
+        # Monto Total Caballero = Valor Oro + Costo Fijo + Costo Adicional Talla + Costo Diamantes
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab 
         monto_total_bruto += monto_cab
         
@@ -364,12 +368,9 @@ def formulario():
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
 
         if not anchos or not tallas:
-            # Aquí la advertencia puede ser engañosa, ya que las opciones se basan solo en Modelo/Metal (no Kilate).
-            # Si el usuario selecciona un Kilate que no existe para ese Modelo/Metal/Ancho, el peso será 0 y el cálculo fallará.
             warning_msg = f'<p class="text-yellow-700 pt-3">Asegúrese de que el Modelo/Metal seleccionado tenga opciones de Ancho y Talla registradas.</p>'
             
-            # Forzamos a que solo se habilite Ancho/Talla si hay opciones disponibles para evitar errores.
-            if not anchos or not talla_actual: # Usamos talla_actual como un proxy de si hay tallas en general.
+            if not anchos or not talla_actual:
                 html_ancho_talla = f'<div class="w-full md:w-2/3"><p class="text-red-500 pt-3">No hay opciones de Ancho/Talla disponibles para esta combinación de Metal.</p></div>'
                 return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}{html_ancho_talla}</div>'
 
@@ -544,7 +545,7 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    # ... (El código del catálogo se mantiene igual ya que no usa el Kilataje como filtro)
+    """Ruta del catálogo: selecciona Modelo y Metal."""
     df, _ = cargar_datos()
     
     mensaje_exito = None
@@ -681,7 +682,7 @@ def catalogo():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>{t['titulo']}</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <style> /* Estilos para el catálogo (omisiones) */ </style>
+        <style> /* Estilos omitidos */ </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
@@ -723,6 +724,4 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == "__main__":
-    # Asegúrate de que tienes un archivo "Formulario Catalogo.xlsm" y un subdirectorio "static"
-    # con imágenes y un logo.png para que el código funcione correctamente.
     app.run(debug=True)
