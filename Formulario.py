@@ -103,19 +103,14 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         
         # 3. Extracción de Costos de Diamantes
         
-        # Costo Laboratorio: Columna MONTO F3 / MONTO. Asumimos Fila 2 de datos (índice 1 del df_adicional procesado)
         if "MONTO F3" in df_adicional_headers:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
         monto_laboratorio_raw = None
-        # Accedemos al valor de la FILA 2 (índice 1 de datos) de la columna MONTO
         if "MONTO" in df_adicional.columns and len(df_adicional) > 1:
             monto_laboratorio_raw = df_adicional["MONTO"].iloc[1]
             
-        # Costo Natural: Columna F, Fila 2 (índice 1 de datos en el df_adicional procesado)
         monto_natural_raw = None
-        # Fila 2 (índice 1 en df_adicional), Columna F (índice 5 en df_adicional_raw si no hay cambios en columnas)
-        # Usamos df_adicional_raw.iloc[1, 5] para ser estrictos con la ubicación en Excel (Fila 2, Columna F)
         if len(df_adicional_raw) > 2 and len(df_adicional_raw.columns) > 5:
             monto_natural_raw = df_adicional_raw.iloc[1, 5] 
         
@@ -132,7 +127,6 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
             
         # 5. Cachear CT por modelo para decidir si mostrar el selector
         if "NAME" in df.columns and "CT" in df.columns:
-             # Agrupar por modelo/ancho/metal/kilates/genero para obtener el CT base.
              ct_group = df.groupby(["NAME", "ANCHO", "METAL", "CARAT", "GENERO"])["CT"].first().reset_index()
              for _, row in ct_group.iterrows():
                  key = f"{row['NAME']}|{row['ANCHO']}|{row['METAL']}|{row['CARAT']}|{row['GENERO']}"
@@ -202,7 +196,6 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # Costos por tipo de diamante
     monto_f3_diamante_laboratorio = costos_diamantes.get("laboratorio", 0.0)
     monto_f3_diamante_natural = costos_diamantes.get("natural", 0.0)
     
@@ -229,10 +222,9 @@ def formulario():
         "nombre": "Nombre del Cliente",
         "email": "Email de Contacto",
         "cambiar_idioma": "Cambiar Idioma",
-        "ir_catalogo": "Ir al Catálogo" # Nuevo texto
+        "ir_catalogo": "Ir al Catálogo"
     }
     
-    # Adaptar textos si el idioma no es español (para consistencia)
     if not es:
         t.update({
             "titulo": "ESTIMATE",
@@ -259,6 +251,7 @@ def formulario():
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
     tipo_diamante_dama = request.form.get("tipo_diamante_dama", session.get("tipo_diamante_dama", "Laboratorio"))
+    # Usamos el texto de 'seleccionar' en mayúsculas como valor por defecto/no seleccionado
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
     
@@ -269,7 +262,7 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
 
-    # Actualizar sesión
+    # Actualizar sesión (se mantiene la lógica)
     session["nombre_cliente"] = nombre_cliente 
     session["email_cliente"] = email_cliente 
     session["kilates_dama"] = kilates_dama
@@ -286,7 +279,6 @@ def formulario():
         
     fresh_selection = request.args.get("fresh_selection")
     if fresh_selection:
-        # Lógica para restablecer anchos y tallas al cambiar modelo/metal
         session["ancho_dama"] = "" 
         session["talla_dama"] = ""
         session["ancho_cab"] = ""
@@ -296,7 +288,7 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
 
-    # --- Opciones disponibles y Autoselección (Misma lógica) ---
+    # --- Opciones disponibles y Autoselección ---
     def get_options(modelo, metal):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal:
             return [], []
@@ -339,7 +331,7 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- 2. Cálculos (Misma lógica de cálculo) ---
+    # --- 2. Cálculos (Se mantiene la lógica de cálculo) ---
     
     # --- Dama ---
     peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper())
@@ -397,7 +389,6 @@ def formulario():
         
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
     
-    # Detalle de cálculo para mostrar en la interfaz (Mismo formato)
     detalle_dama = (
         f' (Peso: {peso_base_dama:,.2f}g ({kilates_dama}K), '
         f'Add: ${cost_adicional_dama:,.2f}, CT: {ct_dama:,.3f}, '
@@ -501,6 +492,55 @@ def formulario():
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     logo_url = url_for('static', filename='logo.png')
     
+    # --- Lógica de Visibilidad de Secciones ---
+    texto_seleccionado = t['seleccionar'].upper()
+    
+    modelo_dama_visible = modelo_dama != texto_seleccionado
+    modelo_cab_visible = modelo_cab != texto_seleccionado
+    
+    seccion_dama_html = ""
+    if modelo_dama_visible:
+        seccion_dama_html = f"""
+            <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
+            <div class="bg-pink-50 p-4 rounded-lg space-y-3">
+                <p class="text-sm font-medium text-gray-700">
+                    Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span>
+                    {' (' + metal_dama + ')' if metal_dama else ''}
+                </p>
+                {selectores_dama}
+                <span class="text-xs text-gray-500 block pt-2">
+                    {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD' + detalle_dama if monto_dama > 0 or ct_dama > 0 else 'Seleccione todos los detalles para calcular.'}
+                </span>
+            </div>
+        """
+        
+    seccion_cab_html = ""
+    if modelo_cab_visible:
+        seccion_cab_html = f"""
+            <h2 class="text-xl font-semibold pt-4 text-blue-700">Modelo {t['cab']}</h2>
+            <div class="bg-blue-50 p-4 rounded-lg space-y-3">
+                <p class="text-sm font-medium text-gray-700">
+                    Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span>
+                    {' (' + metal_cab + ')' if metal_cab else ''}
+                </p>
+                {selectores_cab}
+                <span class="text-xs text-gray-500 block pt-2">
+                    {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 or ct_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                </span>
+            </div>
+        """
+    
+    # El botón "Guardar" solo debe aparecer si al menos un modelo está visible
+    boton_guardar_html = ""
+    if modelo_dama_visible or modelo_cab_visible:
+        boton_guardar_html = f"""
+            <div class="pt-6">
+                <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
+                    {t['guardar']} (Aplicar Cambios y Guardar)
+                </button>
+            </div>
+        """
+    
     html_form = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
@@ -577,45 +617,22 @@ def formulario():
                     </div>
                 </div>
                 
-                <div class="pb-6"> 
-                    <a href="{url_for('catalogo')}" class="inline-block px-4 py-2 text-white bg-indigo-600 rounded-lg shadow-md hover:bg-indigo-700 transition duration-150 text-sm font-semibold">
+                <div class="pb-6 flex justify-center w-full"> 
+                    <a href="{url_for('catalogo')}" class="w-full max-w-md px-8 py-4 text-lg text-white bg-indigo-600 rounded-lg shadow-xl hover:bg-indigo-700 transition duration-150 font-bold text-center">
                         {t['ir_catalogo']}
                     </a>
                 </div>
-                <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
-                <div class="bg-pink-50 p-4 rounded-lg space-y-3">
-                    <p class="text-sm font-medium text-gray-700">
-                        Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span>
-                        {' (' + metal_dama + ')' if metal_dama else ''}
-                    </p>
-                    {selectores_dama}
-                    <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD' + detalle_dama if monto_dama > 0 or ct_dama > 0 else 'Seleccione todos los detalles para calcular.'}
-                    </span>
-                </div>
 
-                <h2 class="text-xl font-semibold pt-4 text-blue-700">Modelo {t['cab']}</h2>
-                <div class="bg-blue-50 p-4 rounded-lg space-y-3">
-                    <p class="text-sm font-medium text-gray-700">
-                        Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span>
-                        {' (' + metal_cab + ')' if metal_cab else ''}
-                    </p>
-                    {selectores_cab}
-                    <span class="text-xs text-gray-500 block pt-2">
-                        {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 or ct_cab > 0 else 'Seleccione todos los detalles para calcular.'}
-                    </span>
-                </div>
+                {seccion_dama_html}
+
+                {seccion_cab_html}
 
                 <div class="pt-6">
                     <label class="block text-lg font-bold text-gray-800 mb-2">{t['monto']}</label>
                     <p class="text-4xl font-extrabold text-indigo-600">${monto_total_aprox:,.2f} USD</p>
                 </div>
                 
-                <div class="pt-6">
-                    <button type="submit" class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition duration-150 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
-                        {t['guardar']} (Aplicar Cambios y Guardar)
-                    </button>
-                </div>
+                {boton_guardar_html}
             </form> 
         </div>
         
@@ -661,7 +678,6 @@ def catalogo():
         tipo = request.form.get("tipo")
         
         if request.form.get("volver_btn") == "true":
-            # El parámetro fresh_selection=True asegura que se reintenten seleccionar ancho/talla
             return redirect(url_for("formulario", fresh_selection=True)) 
         
         if seleccion and tipo:
