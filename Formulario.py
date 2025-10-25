@@ -13,12 +13,10 @@ logging.basicConfig(level=logging.INFO)
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
 # Es CRUCIAL que la clave secreta se establezca para que las sesiones funcionen.
-# DEBES CAMBIAR ESTA CLAVE EN PRODUCCIÓN
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
-# Asegúrate de que este archivo exista en la misma ubicación que tu script.
 EXCEL_PATH = "Formulario Catalogo.xlsm" 
-# Factores de pureza (Kilates / 24)
+# Factores de pureza (Kilates / 24) - NECESARIOS para calcular el VALOR monetario del oro.
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 
@@ -49,7 +47,10 @@ def obtener_precio_oro() -> Tuple[float, str]:
         return DEFAULT_GOLD_PRICE, "fallback"
 
 def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
-    """Calcula el valor del gramo de la aleación y el monto total de oro de la joya."""
+    """
+    Calcula el valor del gramo de la aleación y el monto total de oro de la joya.
+    peso_gramos es el PESO total de la joya obtenido de la columna 'PESO'.
+    """
     if valor_onza <= 0 or peso_gramos <= 0 or pureza_factor <= 0:
         return 0.0, 0.0
     
@@ -88,8 +89,8 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = new_columns_adicional
         
-        # 3. Limpieza y estandarización de columnas
-        cols_to_strip = ["NAME", "METAL", "RUTA FOTO", "PESO", "GENERO", "CT", "ANCHO"] 
+        # 3. Limpieza y estandarización de columnas clave, incluyendo CARAT.
+        cols_to_strip = ["NAME", "METAL", "RUTA FOTO", "PESO", "GENERO", "CT", "ANCHO", "CARAT"] 
         for col in cols_to_strip:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -108,27 +109,23 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
         return pd.DataFrame(), pd.DataFrame()
 
-def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-    """Extrae solo el nombre del archivo del path."""
-    if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        return "placeholder.png" 
-    ruta_limpia = str(ruta_completa).replace('\\', '/')
-    nombre_archivo = os.path.basename(ruta_limpia).strip()
-    return unquote(nombre_archivo)
-
-def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: 
-    """Busca peso BASE, costos fijo/adicional (por talla) y CT en los DataFrames."""
+def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: 
+    """
+    Busca peso BASE, costos fijo/adicional (por talla) y CT.
+    El PESO ahora depende directamente del KILATAJE (CARAT) seleccionado.
+    """
     
     global df_global 
     
-    if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
+    if df_global.empty or not all([modelo, metal, ancho, kilates, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0, 0.0 
         
     # 1. Buscar el PESO (BASE), COSTO FIJO y CT en df_global (WEDDING BANDS)
-    # Filtro EXACTO por las 4 claves para obtener la fila única
+    # Filtro EXACTO incluyendo KILATAJE (CARAT) como clave para encontrar la fila del peso base.
     filtro_base = (df_global["NAME"] == modelo) & \
                   (df_global["ANCHO"] == ancho) & \
                   (df_global["METAL"] == metal) & \
+                  (df_global["CARAT"] == kilates) & \
                   (df_global["GENERO"] == genero) 
     
     peso = 0.0 
@@ -148,7 +145,6 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
         try: ct = float(ct_raw) 
         except: ct = 0.0
 
-
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns:
@@ -163,6 +159,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     return peso, price_cost, cost_adicional, ct 
 
 # --------------------- RUTAS FLASK ---------------------
+---
 
 @app.route("/", methods=["GET", "POST"])
 def formulario():
@@ -172,7 +169,7 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # 0. Obtener MONTO (Costo unitario por quilate de diamante) de la hoja SIZE (Celda F3)
+    # 0. Obtener MONTO (Costo unitario por quilate de diamante)
     monto_f3_diamante = 0.0
     if not df_adicional.empty and "MONTO" in df_adicional.columns: 
         try:
@@ -182,7 +179,7 @@ def formulario():
         except Exception as e:
             logging.warning(f"Error al obtener/convertir el valor de MONTO (F3). Usando 0.0. Error: {e}")
     
-    # --- 1. Definición de Textos y Carga de Idioma (No modificado) ---
+    # --- Carga de Idioma y Textos ---
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     session["idioma"] = idioma 
     es = idioma == "Español"
@@ -203,17 +200,15 @@ def formulario():
         "email": "Email de Contacto" if es else "Contact Email",
         "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
     }
-    
-    # --- 2. Carga/Persistencia de Variables (No modificado) ---
+
+    # --- Carga/Persistencia de Variables ---
     nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", "")) 
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", "")) 
-
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
-    
     kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
     ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
     talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
@@ -232,27 +227,24 @@ def formulario():
     if request.method == "POST" and "idioma" in request.form:
          return redirect(url_for("formulario"))
         
-    # Manejo de Regreso de Catálogo (Fuerza reseteo de Ancho/Talla)
     fresh_selection = request.args.get("fresh_selection")
     if fresh_selection:
         session["ancho_dama"] = "" 
         session["talla_dama"] = ""
         session["ancho_cab"] = ""
         session["talla_cab"] = ""
-        # Recargar los valores vacíos después del reset
         ancho_dama = ""
         talla_dama = ""
         ancho_cab = ""
         talla_cab = ""
 
-
-    # --- 3. Opciones disponibles y Autoselección ---
+    # --- Opciones disponibles y Autoselección ---
     def get_options(modelo, metal):
-        if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper():
+        if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal:
             return [], []
         
-        # Filtro por Modelo y Metal para obtener solo los anchos válidos para esa combinación
-        filtro_ancho = (df["NAME"] == modelo) & (df["METAL"] == metal)
+        # Filtro por Modelo y Metal para obtener los anchos válidos para esa combinación (de cualquier Kilataje)
+        filtro_base_options = (df["NAME"] == modelo) & (df["METAL"] == metal)
         
         def sort_numeric_key(value_str):
             try:
@@ -260,7 +252,7 @@ def formulario():
             except ValueError:
                 return float('inf') 
                 
-        anchos_raw = df.loc[filtro_ancho, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
+        anchos_raw = df.loc[filtro_base_options, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric_key)
         
         tallas_raw = df_adicional["SIZE"].astype(str).str.strip().unique().tolist() if "SIZE" in df_adicional.columns else []
@@ -293,48 +285,41 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- 4. Cálculos ---
+    # --- Cálculos ---
     
     # --- Dama ---
-    peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
+    # Usando el Kilataje como filtro para obtener el peso base EXACTO
+    peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     monto_diamantes_dama = 0.0 
-    peso_ajustado_dama = 0.0 # Peso ajustado por Kilates (Oro Puro) para visualización
 
     if peso_base_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         
         factor_pureza_dama = FACTOR_KILATES.get(kilates_dama, 0.0)
         
-        # El peso total del anillo es el peso base. El valor del oro se calcula usando ese peso y la pureza (Kilates)
-        peso_ajustado_dama = peso_base_dama * factor_pureza_dama
-        
-        # Calcular el valor del oro
+        # Calculamos el valor del oro (el peso base se usa con el factor de pureza del Kilate)
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
         
-        # Calcular monto de diamantes (CT * MONTO de celda F3)
+        # Calcular monto de diamantes
         if ct_dama > 0 and monto_f3_diamante > 0:
             monto_diamantes_dama = ct_dama * monto_f3_diamante
         else:
             monto_diamantes_dama = 0.0
 
-        # Monto Total Dama
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
 
     # --- Caballero ---
-    peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
+    # Usando el Kilataje como filtro para obtener el peso base EXACTO
+    peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     monto_diamantes_cab = 0.0 
-    peso_ajustado_cab = 0.0 
     
     if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         
         factor_pureza_cab = FACTOR_KILATES.get(kilates_cab, 0.0)
         
-        # El peso total del anillo es el peso base. El valor del oro se calcula usando ese peso y la pureza (Kilates)
-        peso_ajustado_cab = peso_base_cab * factor_pureza_cab
-        
-        # Calcular el valor del oro
+        # Calculamos el valor del oro
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
         
         # Calcular monto de diamantes
@@ -343,7 +328,6 @@ def formulario():
         else:
             monto_diamantes_cab = 0.0
 
-        # Monto Total Caballero
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab 
         monto_total_bruto += monto_cab
         
@@ -351,15 +335,13 @@ def formulario():
     
     # Detalle de cálculo para mostrar en la interfaz
     detalle_dama = (
-        f' (Peso Base: {peso_base_dama:,.2f}g, '
-        f'Peso Oro Puro ({kilates_dama}K): {peso_ajustado_dama:,.2f}g, ' 
+        f' (Peso: {peso_base_dama:,.2f}g ({kilates_dama}K), '
         f'Add: ${cost_adicional_dama:,.2f}, CT: {ct_dama:,.3f}, '
         f'Diamantes: ${monto_diamantes_dama:,.2f})'
     )
         
     detalle_cab = (
-        f' (Peso Base: {peso_base_cab:,.2f}g, '
-        f'Peso Oro Puro ({kilates_cab}K): {peso_ajustado_cab:,.2f}g, ' 
+        f' (Peso: {peso_base_cab:,.2f}g ({kilates_cab}K), '
         f'Add: ${cost_adicional_cab:,.2f}, CT: {ct_cab:,.3f}, '
         f'Diamantes: ${monto_diamantes_cab:,.2f})'
     )
@@ -369,8 +351,6 @@ def formulario():
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual):
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         
-        # El onchange aquí es crucial para que al cambiar los Kilates, se recargue el formulario 
-        # y se actualice el peso.
         kilates_selector = f"""
             <div class="w-full md:w-1/3">
                 <label for="kilates_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['kilates']}</label>
@@ -380,15 +360,21 @@ def formulario():
             </div>
         """
 
-        # Verificar si hay selección o si las opciones están disponibles
         if modelo == t['seleccionar'].upper() or not metal:
-            warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo y metal en el Catálogo para continuar.</p>'
+            warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo y metal en el Catálogo para habilitar opciones.</p>'
             return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
 
         if not anchos or not tallas:
-            warning_msg = f'<p class="text-red-500 pt-3">No se encontraron opciones de Ancho o Talla para el modelo/metal seleccionado.</p>'
-            return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}</div>{warning_msg}'
-        
+            # Aquí la advertencia puede ser engañosa, ya que las opciones se basan solo en Modelo/Metal (no Kilate).
+            # Si el usuario selecciona un Kilate que no existe para ese Modelo/Metal/Ancho, el peso será 0 y el cálculo fallará.
+            warning_msg = f'<p class="text-yellow-700 pt-3">Asegúrese de que el Modelo/Metal seleccionado tenga opciones de Ancho y Talla registradas.</p>'
+            
+            # Forzamos a que solo se habilite Ancho/Talla si hay opciones disponibles para evitar errores.
+            if not anchos or not talla_actual: # Usamos talla_actual como un proxy de si hay tallas en general.
+                html_ancho_talla = f'<div class="w-full md:w-2/3"><p class="text-red-500 pt-3">No hay opciones de Ancho/Talla disponibles para esta combinación de Metal.</p></div>'
+                return f'<div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">{kilates_selector}{html_ancho_talla}</div>'
+
+
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -424,7 +410,37 @@ def formulario():
         <title>{t['titulo']}</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
-            /* Estilos omitidos por brevedad */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+            body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
+            .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
+            .header-content {{ 
+                display: flex; 
+                align-items: center; 
+                justify-content: space-between; 
+                width: 100%;
+                margin-bottom: 1rem;
+            }}
+            .title-group {{
+                display: flex;
+                align-items: center;
+                flex-grow: 1; 
+            }}
+            .logo-img {{ 
+                height: 60px; 
+                margin-right: 15px; 
+            }}
+            @media (max-width: 640px) {{
+                .logo-img {{ height: 40px; }}
+            }}
+            h1 {{ 
+                flex-grow: 1; 
+                text-align: center; 
+                margin: 0; 
+            }} 
+            .language-selector-container {{
+                min-width: 120px; 
+                text-align: right;
+            }}
         </style>
     </head>
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
@@ -502,7 +518,23 @@ def formulario():
         </div>
         
         <script>
-            // Lógica de guardado en localStorage (Omitida por brevedad)
+            // Lógica de guardado en localStorage (Mantener)
+            const nombreInput = document.getElementById('nombre_cliente');
+            const emailInput = document.getElementById('email_cliente');
+            document.addEventListener('DOMContentLoaded', () => {{
+                if (!nombreInput.value && localStorage.getItem('nombre_cliente')) {{
+                    nombreInput.value = localStorage.getItem('nombre_cliente');
+                }}
+                if (!emailInput.value && localStorage.getItem('email_cliente')) {{
+                    emailInput.value = localStorage.getItem('email_cliente');
+                }}
+            }});
+            nombreInput.addEventListener('input', (e) => {{
+                localStorage.setItem('nombre_cliente', e.target.value);
+            }});
+            emailInput.addEventListener('input', (e) => {{
+                localStorage.setItem('email_cliente', e.target.value);
+            }});
         </script>
     </body>
     </html>
@@ -513,7 +545,7 @@ def formulario():
 
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
-    """Ruta del catálogo: selecciona Modelo y Metal. (Sin cambios en la lógica del catálogo)"""
+    # ... (El código del catálogo se mantiene igual ya que no usa el Kilataje como filtro)
     df, _ = cargar_datos()
     
     mensaje_exito = None
@@ -541,7 +573,6 @@ def catalogo():
                 mensaje_exito = "❌ Error al procesar la selección."
 
 
-    # Generación del catálogo (Omitido por brevedad)
     idioma = session.get("idioma", "Español")
     es = idioma == "Español"
     
@@ -574,6 +605,13 @@ def catalogo():
     df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
     variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
     
+    def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
+        if pd.isna(ruta_completa) or not str(ruta_completa).strip():
+            return "placeholder.png" 
+        ruta_limpia = str(ruta_completa).replace('\\', '/')
+        nombre_archivo = os.path.basename(ruta_limpia).strip()
+        return unquote(nombre_archivo)
+        
     catalogo_items = []
     for _, fila in variantes_unicas.iterrows():
         modelo = str(fila["NAME"]).strip().upper()
@@ -644,7 +682,7 @@ def catalogo():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>{t['titulo']}</title>
         <script src="https://cdn.tailwindcss.com"></script>
-        <style> /* Estilos omitidos */ </style>
+        <style> /* Estilos para el catálogo (omisiones) */ </style>
     </head>
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
@@ -686,4 +724,6 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == "__main__":
+    # Asegúrate de que tienes un archivo "Formulario Catalogo.xlsm" y un subdirectorio "static"
+    # con imágenes y un logo.png para que el código funcione correctamente.
     app.run(debug=True)
