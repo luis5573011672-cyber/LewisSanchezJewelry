@@ -18,6 +18,7 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_pa
 
 # Asegúrate de que este archivo exista en la misma ubicación que tu script.
 EXCEL_PATH = "Formulario Catalogo.xlsm" 
+# Factores de pureza (Kilates / 24)
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
 DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 
@@ -31,6 +32,7 @@ def obtener_precio_oro() -> Tuple[float, str]:
     """
     Obtiene el precio actual del oro (XAU/USD) por onza.
     """
+    # Usando una API_KEY de ejemplo. Reemplaza con una clave válida en producción.
     API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
     url = "https://www.goldapi.io/api/XAU/USD"
     headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
@@ -52,14 +54,21 @@ def obtener_precio_oro() -> Tuple[float, str]:
         return DEFAULT_GOLD_PRICE, "fallback"
 
 def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
-    """Calcula el valor del gramo de oro y el monto total de oro de la joya."""
+    """
+    Calcula el valor del gramo de oro (ajustado por pureza) y el monto total de oro de la joya.
+    
+    El cálculo es: (Precio Onza / Gramos en Onza) * Pureza * Peso Total
+    Esto es el cálculo correcto del valor del oro puro contenido en la aleación.
+    """
     if valor_onza <= 0 or peso_gramos <= 0 or pureza_factor <= 0:
         return 0.0, 0.0
     
     # Onza Troy (31.1035 gramos)
-    valor_gramo = (valor_onza / 31.1035) * pureza_factor
-    monto_total = valor_gramo * peso_gramos
-    return valor_gramo, monto_total
+    valor_gramo_puro = valor_onza / 31.1035
+    valor_gramo_aleacion = valor_gramo_puro * pureza_factor
+    monto_total = valor_gramo_aleacion * peso_gramos
+    
+    return valor_gramo_aleacion, monto_total
 
 def calcular_monto_aproximado(monto_bruto: float) -> float:
     """Aproxima (redondea hacia arriba) el monto al múltiplo de 10 más cercano."""
@@ -95,7 +104,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = new_columns_adicional
         
-        # 3. Limpieza de valores clave
+        # 3. Limpieza de valores clave en WEDDING BANDS
         for col in ["NAME", "METAL", "RUTA FOTO", "ANCHO", "PESO", "PESO_AJUSTADO", "GENERO", "CT"]: 
             if col in df.columns:
                 if col == "ANCHO":
@@ -107,7 +116,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame]:
         for col_name in ["SIZE", "ADICIONAL", "MONTO F3", "MONTO"]: 
             if col_name in df_adicional.columns:
                 df_adicional[col_name] = df_adicional[col_name].astype(str).str.strip()
-            # Renombrar MONTO F3 a MONTO si existe, para unificar
+            # Renombrar MONTO F3 a MONTO si existe, para unificar y buscar el costo del diamante
             if "MONTO F3" in df_adicional.columns and "MONTO" not in df_adicional.columns:
                  df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
@@ -136,30 +145,34 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     return nombre_archivo_final
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: 
-    """Busca peso, costos fijo/adicional y CT en los DataFrames."""
+    """
+    Busca peso BASE, costos fijo/adicional (por talla) y CT en los DataFrames,
+    basado en el modelo seleccionado, metal, ancho y género.
+    """
     
     global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0, 0.0 
         
-    # 1. Buscar el PESO, COSTO FIJO y CT en df_global (WEDDING BANDS)
+    # 1. Buscar el PESO (BASE), COSTO FIJO y CT en df_global (WEDDING BANDS)
     filtro_base = (df_global["NAME"] == modelo) & \
                   (df_global["ANCHO"] == ancho) & \
                   (df_global["METAL"] == metal) & \
                   (df_global["GENERO"] == genero) 
     
-    peso = 0.0
-    price_cost = 0.0 
-    ct = 0.0 
+    peso = 0.0 # Peso BASE del metal (sin ajuste por Kilates aún)
+    price_cost = 0.0 # Costo Fijo (PRICE COST)
+    ct = 0.0 # Quilataje total del diamante (CT)
     
     if not df_global.loc[filtro_base].empty:
         base_fila = df_global.loc[filtro_base].iloc[0]
-        # Usamos PESO, que es el peso base del modelo sin ajuste por talla.
+        # Obtener los valores crudos
         peso_raw = base_fila.get("PESO", 0) 
         price_cost_raw = base_fila.get("PRICE COST", 0) 
         ct_raw = base_fila.get("CT", 0) 
         
+        # Conversión a float
         try: peso = float(peso_raw)
         except: peso = 0.0
         try: price_cost = float(price_cost_raw)
@@ -168,7 +181,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
         except: ct = 0.0
 
 
-    # 2. Buscar el COSTO ADICIONAL en df_adicional_local (Hoja SIZE)
+    # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns:
         filtro_adicional = (df_adicional_local["SIZE"] == talla) 
@@ -179,6 +192,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
             try: cost_adicional = float(cost_adicional_raw)
             except: cost_adicional = 0.0
 
+    # Devuelve el peso base, costos fijo, adicional por talla, y quilataje de diamante.
     return peso, price_cost, cost_adicional, ct 
 
 # --------------------- RUTAS FLASK ---------------------
@@ -191,20 +205,13 @@ def formulario():
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
-    # --- 0. Obtener MONTO de la hoja SIZE (Columna F, Fila 3 -> Índice 1 de los datos) ---
+    # --- 0. Obtener MONTO (Costo unitario por quilate de diamante) de la hoja SIZE (Celda F3 -> Índice 1 de los datos) ---
     monto_f3_diamante = 0.0
-    # Asegurarse de que la columna exista con el nombre "MONTO"
     if not df_adicional.empty and "MONTO" in df_adicional.columns: 
         try:
-            # Índice 1 corresponde a la tercera fila del Excel (F3)
-            if len(df_adicional) > 1:
-                monto_f3_raw = df_adicional["MONTO"].iloc[1] 
-            elif len(df_adicional) > 0:
-                 # Caso de respaldo si solo hay una fila de datos
-                monto_f3_raw = df_adicional["MONTO"].iloc[0]
-            else:
-                monto_f3_raw = None
-
+            # Índice 1 corresponde a la tercera fila del Excel (F3) en los datos cargados.
+            # Esto asume que el header fue la fila 1 y los datos comienzan en la fila 2.
+            monto_f3_raw = df_adicional["MONTO"].iloc[1] if len(df_adicional) > 1 else (df_adicional["MONTO"].iloc[0] if len(df_adicional) > 0 else None)
             if pd.notna(monto_f3_raw) and str(monto_f3_raw).strip():
                  monto_f3_diamante = float(str(monto_f3_raw).strip())
             
@@ -256,18 +263,13 @@ def formulario():
     
     # --- 2. Carga de Variables de SESIÓN (GET) o POST (Actualización) ---
     
-    # Datos del Cliente
     nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", "")) 
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", "")) 
-
-    # Datos del Anillo Dama
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
-    
-    # Datos del Anillo Caballero
     kilates_cab = request.form.get("kilates_cab", session.get("kilates_cab", "14"))
     ancho_cab = request.form.get("ancho_cab", session.get("ancho_cab", ""))
     talla_cab = request.form.get("talla_cab", session.get("talla_cab", ""))
@@ -347,28 +349,29 @@ def formulario():
     # --- 7. Cálculos (AJUSTE CRUCIAL DEL PESO POR KILATAJE) ---
     
     # --- Dama ---
+    # peso_base_dama es el peso obtenido de la fila del catálogo (WEDDING BANDS)
     peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, talla_dama, "DAMA", t['seleccionar'].upper())
     monto_dama = 0.0
     monto_diamantes_dama = 0.0 
-    peso_ajustado_dama = 0.0 # Valor para mostrar el peso ajustado (Oro Puro)
+    peso_ajustado_dama = 0.0 # Peso ajustado por Kilates (Oro Puro) para visualización
 
     if peso_base_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         
         factor_pureza_dama = FACTOR_KILATES.get(kilates_dama, 0.0)
         
-        # 1. Ajustar el peso para visualización (Peso Base * Factor Pureza)
+        # 1. Determinar el Peso de Oro Puro (para visualización)
         peso_ajustado_dama = peso_base_dama * factor_pureza_dama
         
         # 2. Calcular el valor del oro (usando peso base y factor de pureza)
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
         
-        # 3. Calcular monto de diamantes 
+        # 3. Calcular monto de diamantes (CT * MONTO de celda F3)
         if ct_dama > 0 and monto_f3_diamante > 0:
             monto_diamantes_dama = ct_dama * monto_f3_diamante
         else:
             monto_diamantes_dama = 0.0
 
-        # 4. Monto Total Dama
+        # 4. Monto Total Dama = Valor Oro + Costo Fijo + Costo Adicional Talla + Costo Diamantes
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
 
@@ -376,19 +379,19 @@ def formulario():
     peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
     monto_cab = 0.0
     monto_diamantes_cab = 0.0 
-    peso_ajustado_cab = 0.0 # Valor para mostrar el peso ajustado (Oro Puro)
+    peso_ajustado_cab = 0.0 # Peso ajustado por Kilates (Oro Puro) para visualización
     
     if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         
         factor_pureza_cab = FACTOR_KILATES.get(kilates_cab, 0.0)
         
-        # 1. Ajustar el peso para visualización (Peso Base * Factor Pureza)
+        # 1. Determinar el Peso de Oro Puro (para visualización)
         peso_ajustado_cab = peso_base_cab * factor_pureza_cab
         
         # 2. Calcular el valor del oro
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
         
-        # 3. Calcular monto de diamantes 
+        # 3. Calcular monto de diamantes
         if ct_cab > 0 and monto_f3_diamante > 0:
             monto_diamantes_cab = ct_cab * monto_f3_diamante
         else:
@@ -400,21 +403,21 @@ def formulario():
         
     monto_total_aprox = calcular_monto_aproximado(monto_total_bruto)
     
-    # URL de la imagen (asumiendo que está en /static/logo.png)
+    # URL de la imagen
     logo_url = url_for('static', filename='logo.png')
 
 
-    # Detalle de diamantes para mostrar
+    # Detalle de cálculo para mostrar en la interfaz (incluye el peso ajustado)
     detalle_dama = (
         f' (Peso Base: {peso_base_dama:,.2f}g, '
-        f'Peso Oro Puro ({kilates_dama}K): {peso_ajustado_dama:,.2f}g, ' # Peso ajustado se actualiza con Kilates
+        f'Peso Oro Puro ({kilates_dama}K): {peso_ajustado_dama:,.2f}g, ' 
         f'Add: ${cost_adicional_dama:,.2f}, CT: {ct_dama:,.3f}, '
         f'Diamantes: ${monto_diamantes_dama:,.2f})'
     )
         
     detalle_cab = (
         f' (Peso Base: {peso_base_cab:,.2f}g, '
-        f'Peso Oro Puro ({kilates_cab}K): {peso_ajustado_cab:,.2f}g, ' # Peso ajustado se actualiza con Kilates
+        f'Peso Oro Puro ({kilates_cab}K): {peso_ajustado_cab:,.2f}g, ' 
         f'Add: ${cost_adicional_cab:,.2f}, CT: {ct_cab:,.3f}, '
         f'Diamantes: ${monto_diamantes_cab:,.2f})'
     )
