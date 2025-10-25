@@ -24,6 +24,7 @@ DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 costos_diamantes_global = {} 
+ct_cache = {} # Nuevo caché para guardar el valor de CT por modelo para su uso en la UI
 
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
@@ -76,17 +77,17 @@ def safe_float(value) -> float:
         pass
     return 0.0
 
-def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
-    """Carga los DataFrames con manejo de caché y limpieza de columnas, y extrae costos de diamante."""
-    global df_global, df_adicional_global, costos_diamantes_global
+def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[str, float]]:
+    """Carga los DataFrames, costos de diamante y CTs por modelo (con caché)."""
+    global df_global, df_adicional_global, costos_diamantes_global, ct_cache
     
-    # 1. Usar caché si ya está cargado para prevenir re-lecturas (ayuda con 502)
-    if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global:
-        return df_global, df_adicional_global, costos_diamantes_global
+    if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global and ct_cache:
+        return df_global, df_adicional_global, costos_diamantes_global, ct_cache
 
     costos_diamantes = {"laboratorio": 0.0, "natural": 0.0}
+    ct_cache_temp = {}
     try:
-        # 2. Cargar la hoja WEDDING BANDS
+        # 1. Cargar la hoja WEDDING BANDS
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         df = df_raw.iloc[2:].copy()
@@ -94,51 +95,59 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
         if 'WIDTH' in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
-        # 3. Cargar la hoja SIZE (usamos header=None para acceder por índice numérico si es necesario)
+        # 2. Cargar la hoja SIZE
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
-        # Identificar encabezados para el df procesado
         df_adicional_headers = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = df_adicional_headers
         
-        # 4. Extracción de Costos de Diamantes (Laboratorio y Natural)
+        # 3. Extracción de Costos de Diamantes
         
         # Costo Laboratorio: Columna MONTO F3 / MONTO. Asumimos Fila 2 de datos (índice 1 del df_adicional procesado)
         if "MONTO F3" in df_adicional_headers:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
         monto_laboratorio_raw = None
+        # Accedemos al valor de la FILA 2 (índice 1 de datos) de la columna MONTO
         if "MONTO" in df_adicional.columns and len(df_adicional) > 1:
             monto_laboratorio_raw = df_adicional["MONTO"].iloc[1]
             
-        # Costo Natural: Columna F (índice 5), Fila 2 (índice 2 del df_adicional_raw, o índice 1 del df_adicional)
-        # Usaremos el índice numérico [2, 5] en df_adicional_raw para mayor seguridad (Fila 3, Columna F del Excel)
+        # Costo Natural: Columna F, Fila 2 (índice 2 del df_adicional_raw sin encabezados, columna índice 5)
         monto_natural_raw = None
+        # Fila 2 (índice 2 en raw), Columna F (índice 5 en raw)
         if len(df_adicional_raw) > 2 and len(df_adicional_raw.columns) > 5:
-            # Fila 3 del Excel (índice 2 en pandas), Columna F del Excel (índice 5 en pandas)
-            monto_natural_raw = df_adicional_raw.iloc[2, 5] 
+            monto_natural_raw = df_adicional_raw.iloc[1, 5] 
         
         costos_diamantes["laboratorio"] = safe_float(monto_laboratorio_raw)
         costos_diamantes["natural"] = safe_float(monto_natural_raw)
         
-        # 5. Limpieza y estandarización
+        # 4. Limpieza y estandarización
         cols_to_strip = ["NAME", "METAL", "RUTA FOTO", "PESO", "GENERO", "CT", "ANCHO", "CARAT"] 
         for col in cols_to_strip:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
         if "ANCHO" in df.columns:
             df["ANCHO"] = df["ANCHO"].str.replace('MM', '', regex=False).str.strip()
+            
+        # 5. Cachear CT por modelo para decidir si mostrar el selector
+        if "NAME" in df.columns and "CT" in df.columns:
+             # Agrupar por modelo/ancho/metal/kilates/genero para obtener el CT base.
+             ct_group = df.groupby(["NAME", "ANCHO", "METAL", "CARAT", "GENERO"])["CT"].first().reset_index()
+             for _, row in ct_group.iterrows():
+                 key = f"{row['NAME']}|{row['ANCHO']}|{row['METAL']}|{row['CARAT']}|{row['GENERO']}"
+                 ct_cache_temp[key.upper()] = safe_float(row["CT"])
         
         df_global = df
         df_adicional_global = df_adicional
         costos_diamantes_global = costos_diamantes
+        ct_cache = ct_cache_temp
         
-        return df, df_adicional, costos_diamantes
+        return df, df_adicional, costos_diamantes, ct_cache
         
     except Exception as e:
-        # Esto ayuda a diagnosticar el 502 si es por un error de Python
         logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
-        return pd.DataFrame(), pd.DataFrame(), costos_diamantes
+        # Devolver DataFrames vacíos y costos 0.0 para que la aplicación no falle.
+        return pd.DataFrame(), pd.DataFrame(), costos_diamantes, ct_cache_temp
 
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: 
@@ -164,13 +173,9 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     
     if not df_global.loc[filtro_base].empty:
         base_fila = df_global.loc[filtro_base].iloc[0]
-        peso_raw = base_fila.get("PESO", 0) 
-        price_cost_raw = base_fila.get("PRICE COST", 0) 
-        ct_raw = base_fila.get("CT", 0) 
-        
-        peso = safe_float(peso_raw)
-        price_cost = safe_float(price_cost_raw)
-        ct = safe_float(ct_raw)
+        peso = safe_float(base_fila.get("PESO", 0))
+        price_cost = safe_float(base_fila.get("PRICE COST", 0))
+        ct = safe_float(base_fila.get("CT", 0))
 
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
@@ -183,8 +188,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
         
         if not df_adicional_local.loc[filtro_adicional].empty:
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
-            cost_adicional_raw = adicional_fila.get("ADICIONAL") 
-            cost_adicional = safe_float(cost_adicional_raw)
+            cost_adicional = safe_float(adicional_fila.get("ADICIONAL"))
 
     return peso, price_cost, cost_adicional, ct 
 
@@ -194,7 +198,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
-    df, df_adicional, costos_diamantes = cargar_datos()
+    df, df_adicional, costos_diamantes, ct_cache_local = cargar_datos()
     precio_onza, status = obtener_precio_oro()
     monto_total_bruto = 0.0
     
@@ -208,24 +212,43 @@ def formulario():
     es = idioma == "Español"
 
     t = {
-        "titulo": "PRESUPUESTO" if es else "ESTIMATE",
-        "seleccionar": "Seleccione una opción de catálogo" if es else "Select a catalog option",
+        "titulo": "PRESUPUESTO",
+        "seleccionar": "Seleccione una opción de catálogo",
         "kilates": "Kilates (Carat)",
-        "ancho": "Ancho (mm)" if es else "Width (mm)",
+        "ancho": "Ancho (mm)",
         "talla": "Talla (Size)",
-        "diamante": "Tipo de Diamante" if es else "Diamond Type",
+        "diamante": "Tipo de Diamante",
         "laboratorio": "Laboratorio",
         "natural": "Natural",
-        "guardar": "Guardar" if es else "Save",
-        "monto": "Monto total del presupuesto" if es else "Total estimate amount",
-        "dama": "Dama" if es else "Lady",
-        "cab": "Caballero" if es else "Gentleman",
-        "catalogo_btn": "Abrir Catálogo" if es else "Open Catalog",
-        "cliente_datos": "Datos del Cliente" if es else "Client Details",
-        "nombre": "Nombre del Cliente" if es else "Client Name",
-        "email": "Email de Contacto" if es else "Contact Email",
-        "cambiar_idioma": "Cambiar Idioma" if es else "Change Language"
+        "guardar": "Guardar",
+        "monto": "Monto total del presupuesto",
+        "dama": "Dama",
+        "cab": "Caballero",
+        "catalogo_btn": "Abrir Catálogo",
+        "cliente_datos": "Datos del Cliente",
+        "nombre": "Nombre del Cliente",
+        "email": "Email de Contacto",
+        "cambiar_idioma": "Cambiar Idioma"
     }
+    
+    # Adaptar textos si el idioma no es español (para consistencia)
+    if not es:
+        t.update({
+            "titulo": "ESTIMATE",
+            "seleccionar": "Select a catalog option",
+            "ancho": "Width (mm)",
+            "diamante": "Diamond Type",
+            "guardar": "Save",
+            "monto": "Total estimate amount",
+            "dama": "Lady",
+            "cab": "Gentleman",
+            "catalogo_btn": "Open Catalog",
+            "cliente_datos": "Client Details",
+            "nombre": "Client Name",
+            "email": "Contact Email",
+            "cambiar_idioma": "Change Language"
+        })
+
 
     # --- Carga/Persistencia de Variables ---
     nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", "")) 
@@ -233,6 +256,7 @@ def formulario():
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
+    # Mantenemos el tipo de diamante seleccionado, con Laboratorio como default
     tipo_diamante_dama = request.form.get("tipo_diamante_dama", session.get("tipo_diamante_dama", "Laboratorio"))
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
@@ -244,6 +268,7 @@ def formulario():
     modelo_cab = session.get("modelo_cab", t['seleccionar']).upper()
     metal_cab = session.get("metal_cab", "").upper()
 
+    # Actualizar sesión
     session["nombre_cliente"] = nombre_cliente 
     session["email_cliente"] = email_cliente 
     session["kilates_dama"] = kilates_dama
@@ -260,6 +285,7 @@ def formulario():
         
     fresh_selection = request.args.get("fresh_selection")
     if fresh_selection:
+        # Lógica para restablecer anchos y tallas al cambiar modelo/metal
         session["ancho_dama"] = "" 
         session["talla_dama"] = ""
         session["ancho_cab"] = ""
@@ -324,17 +350,22 @@ def formulario():
         
         factor_pureza_dama = FACTOR_KILATES.get(kilates_dama, 0.0)
         
+        # 2a. Selección del Costo de Diamante Dama
         if tipo_diamante_dama == "Natural":
             costo_diamante_dama_final = monto_f3_diamante_natural
-        else:
+        else: # Default a Laboratorio
             costo_diamante_dama_final = monto_f3_diamante_laboratorio
 
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
         
+        # Calcular monto de diamantes (solo si CT > 0)
         if ct_dama > 0 and costo_diamante_dama_final > 0:
             monto_diamantes_dama = ct_dama * costo_diamante_dama_final
         else:
             monto_diamantes_dama = 0.0
+            # Si CT es 0, no importa la selección, se resetea a Laboratorio
+            tipo_diamante_dama = "Laboratorio"
+            session["tipo_diamante_dama"] = "Laboratorio"
 
         monto_dama = monto_oro_dama + cost_fijo_dama + cost_adicional_dama + monto_diamantes_dama 
         monto_total_bruto += monto_dama
@@ -349,17 +380,22 @@ def formulario():
         
         factor_pureza_cab = FACTOR_KILATES.get(kilates_cab, 0.0)
 
+        # 2b. Selección del Costo de Diamante Caballero
         if tipo_diamante_cab == "Natural":
             costo_diamante_cab_final = monto_f3_diamante_natural
-        else:
+        else: # Default a Laboratorio
             costo_diamante_cab_final = monto_f3_diamante_laboratorio
         
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
         
+        # Calcular monto de diamantes (solo si CT > 0)
         if ct_cab > 0 and costo_diamante_cab_final > 0:
             monto_diamantes_cab = ct_cab * costo_diamante_cab_final
         else:
             monto_diamantes_cab = 0.0
+            # Si CT es 0, no importa la selección, se resetea a Laboratorio
+            tipo_diamante_cab = "Laboratorio"
+            session["tipo_diamante_cab"] = "Laboratorio"
 
         monto_cab = monto_oro_cab + cost_fijo_cab + cost_adicional_cab + monto_diamantes_cab 
         monto_total_bruto += monto_cab
@@ -381,11 +417,24 @@ def formulario():
         f'Subtotal Diamantes: ${monto_diamantes_cab:,.2f})'
     )
     
+    # --- Función para determinar si el selector de diamante debe mostrarse ---
+    def should_show_diamond_selector(modelo, metal, ancho, kilates, genero):
+        if modelo == t['seleccionar'].upper() or not metal or not ancho or not kilates:
+            return False
+        
+        key = f"{modelo}|{ancho}|{metal}|{kilates}|{genero}"
+        return ct_cache_local.get(key.upper(), 0.0) > 0.0
+
+
     # --------------------- Generación del HTML para el Formulario ---------------------
         
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual, tipo_diamante_actual):
+        
         kilates_opciones = sorted(FACTOR_KILATES.keys(), key=int, reverse=True)
         diamante_opciones = ["Laboratorio", "Natural"]
+        genero = "DAMA" if tipo == "dama" else "CABALLERO"
+        
+        mostrar_selector_diamante = should_show_diamond_selector(modelo, metal, ancho_actual, kilates_actual, genero)
         
         kilates_selector = f"""
             <div class="w-full md:w-1/4">
@@ -395,22 +444,30 @@ def formulario():
                 </select>
             </div>
         """
-
-        diamante_selector = f"""
-            <div class="w-full md:w-1/4">
-                <label for="tipo_diamante_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['diamante']}</label>
-                <select id="tipo_diamante_{tipo}" name="tipo_diamante_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
-                    {''.join([f'<option value="{d}" {"selected" if d == tipo_diamante_actual else ""}>{t[d.lower()]}</option>' for d in diamante_opciones])}
-                </select>
-            </div>
-        """
+        
+        diamante_selector = ""
+        # 1. Condición para mostrar el selector
+        if mostrar_selector_diamante:
+            diamante_selector = f"""
+                <div class="w-full md:w-1/4">
+                    <label for="tipo_diamante_{tipo}" class="block text-sm font-medium text-gray-700 mb-1">{t['diamante']}</label>
+                    <select id="tipo_diamante_{tipo}" name="tipo_diamante_{tipo}" class="w-full p-2 border border-gray-300 rounded-lg" onchange="this.form.submit()">
+                        {''.join([f'<option value="{d}" {"selected" if d == tipo_diamante_actual else ""}>{t[d.lower()]}</option>' for d in diamante_opciones])}
+                    </select>
+                </div>
+            """
+        else:
+            # Selector oculto con valor por defecto, si CT es 0
+             diamante_selector = f'<input type="hidden" name="tipo_diamante_{tipo}" value="Laboratorio">'
+        
+        selector_count = 3 + (1 if mostrar_selector_diamante else 0)
         
         if modelo == t['seleccionar'].upper() or not metal:
             warning_msg = f'<p class="text-red-500 pt-3">Seleccione un modelo y metal en el Catálogo para habilitar opciones.</p>'
             return f"""
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
                     {kilates_selector}
-                    {diamante_selector}
+                    {diamante_selector if not mostrar_selector_diamante else ''}
                 </div>
                 {warning_msg}
             """
@@ -420,14 +477,14 @@ def formulario():
             return f"""
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
                     {kilates_selector}
-                    {diamante_selector}
+                    {diamante_selector if not mostrar_selector_diamante else ''}
                 </div>
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
                     {html_ancho_talla}
                 </div>
             """
 
-
+        # Estructura principal de selectores
         html = f"""
         <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
             {kilates_selector}
@@ -600,9 +657,8 @@ def formulario():
 @app.route("/catalogo", methods=["GET", "POST"])
 def catalogo():
     """Ruta del catálogo: selecciona Modelo y Metal."""
-    # Usamos try/except para cargar solo el DataFrame si es posible, sin fallar si el costo de diamante falla
     try:
-        df, _, _ = cargar_datos() 
+        df, _, _, _ = cargar_datos() 
     except Exception as e:
         logging.error(f"Error cargando datos en catálogo: {e}")
         df = pd.DataFrame()
@@ -636,12 +692,20 @@ def catalogo():
     es = idioma == "Español"
     
     t = {
-        "titulo": "Catálogo de Anillos de Boda" if es else "WEDDING RING CATALOG", 
-        "volver": "Volver al Formulario" if es else "Back to Form",
-        "dama": "Dama" if es else "Lady",
-        "caballero": "Caballero" if es else "Gentleman",
-        "metal": "Metal" if es else "Metal",
+        "titulo": "Catálogo de Anillos de Boda", 
+        "volver": "Volver al Formulario",
+        "dama": "Dama",
+        "caballero": "Caballero",
+        "metal": "Metal",
     }
+    
+    if not es:
+        t.update({
+            "titulo": "WEDDING RING CATALOG", 
+            "volver": "Back to Form",
+            "dama": "Lady",
+            "caballero": "Gentleman",
+        })
     
     modelo_dama_actual = session.get("modelo_dama", "")
     metal_dama_actual = session.get("metal_dama", "")
@@ -800,4 +864,5 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == "__main__":
+    # Asegúrese de que 'Formulario Catalogo.xlsm' está en el mismo directorio.
     app.run(debug=True)
