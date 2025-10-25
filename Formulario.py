@@ -149,8 +149,13 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns and "ADICIONAL" in df_adicional_local.columns:
-        # Filtro por Talla (Size)
-        filtro_adicional = (df_adicional_local["SIZE"] == talla) 
+        
+        # Pre-procesamiento de la columna SIZE para asegurar la comparación con la talla de entrada (talla)
+        if "SIZE_STRIP" not in df_adicional_local.columns:
+            df_adicional_local["SIZE_STRIP"] = df_adicional_local["SIZE"].astype(str).str.strip()
+            
+        # Filtrar por la talla exacta seleccionada (talla)
+        filtro_adicional = (df_adicional_local["SIZE_STRIP"] == talla) 
         
         if not df_adicional_local.loc[filtro_adicional].empty:
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
@@ -160,7 +165,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
                 # Intentamos convertir el valor a float de manera segura
                 cost_adicional = float(cost_adicional_raw)
             except (ValueError, TypeError): 
-                # Si falla (ej. si el valor es NaN o una cadena), el costo es 0
+                # Si falla (ej. valor es NaN, None, o una cadena no numérica), el costo es 0
                 cost_adicional = 0.0
 
     return peso, price_cost, cost_adicional, ct 
