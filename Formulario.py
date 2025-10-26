@@ -76,6 +76,14 @@ def safe_float(value) -> float:
     except:
         pass
     return 0.0
+    
+def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
+    """Extrae el nombre del archivo de la ruta de Excel y lo decodifica."""
+    if pd.isna(ruta_completa) or not str(ruta_completa).strip():
+        return "placeholder.png" 
+    ruta_limpia = str(ruta_completa).replace('\\', '/')
+    nombre_archivo = os.path.basename(ruta_limpia).strip()
+    return unquote(nombre_archivo)
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[str, float]]:
     """Carga los DataFrames, costos de diamante y CTs por modelo (con caché)."""
@@ -144,17 +152,17 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         return pd.DataFrame(), pd.DataFrame(), costos_diamantes, ct_cache_temp
 
 
-def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float]: 
+def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float, str]: 
     """
-    Busca peso BASE, costos fijo/adicional (por talla) y CT.
+    Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO.
     """
     
     global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, kilates, talla, genero]) or modelo == select_text:
-        return 0.0, 0.0, 0.0, 0.0 
+        return 0.0, 0.0, 0.0, 0.0, "" 
         
-    # 1. Buscar el PESO (BASE), COSTO FIJO y CT en df_global (WEDDING BANDS)
+    # 1. Buscar el PESO (BASE), COSTO FIJO, CT y RUTA FOTO en df_global (WEDDING BANDS)
     filtro_base = (df_global["NAME"] == modelo) & \
                   (df_global["ANCHO"] == ancho) & \
                   (df_global["METAL"] == metal) & \
@@ -164,12 +172,15 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
     peso = 0.0 
     price_cost = 0.0 
     ct = 0.0 
+    ruta_foto = ""
     
     if not df_global.loc[filtro_base].empty:
         base_fila = df_global.loc[filtro_base].iloc[0]
         peso = safe_float(base_fila.get("PESO", 0))
         price_cost = safe_float(base_fila.get("PRICE COST", 0))
         ct = safe_float(base_fila.get("CT", 0))
+        # Intentamos obtener la ruta de la foto, si existe
+        ruta_foto = str(base_fila.get("RUTA FOTO", "")).strip()
 
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
@@ -184,7 +195,7 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
             adicional_fila = df_adicional_local.loc[filtro_adicional].iloc[0]
             cost_adicional = safe_float(adicional_fila.get("ADICIONAL"))
 
-    return peso, price_cost, cost_adicional, ct 
+    return peso, price_cost, cost_adicional, ct, ruta_foto 
 
 # --------------------- RUTAS FLASK ---------------------
 
@@ -251,7 +262,6 @@ def formulario():
     ancho_dama = request.form.get("ancho_dama", session.get("ancho_dama", ""))
     talla_dama = request.form.get("talla_dama", session.get("talla_dama", ""))
     tipo_diamante_dama = request.form.get("tipo_diamante_dama", session.get("tipo_diamante_dama", "Laboratorio"))
-    # Usamos el texto de 'seleccionar' en mayúsculas como valor por defecto/no seleccionado
     modelo_dama = session.get("modelo_dama", t['seleccionar']).upper()
     metal_dama = session.get("metal_dama", "").upper()
     
@@ -288,7 +298,7 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
 
-    # --- Opciones disponibles y Autoselección ---
+    # --- Opciones disponibles y Autoselección (Misma lógica) ---
     def get_options(modelo, metal):
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal:
             return [], []
@@ -331,13 +341,18 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- 2. Cálculos (Se mantiene la lógica de cálculo) ---
+    # --- 2. Cálculos y Obtención de Rutas de Foto ---
     
     # --- Dama ---
-    peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama = obtener_peso_y_costo(df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper())
+    # MODIFICACIÓN: La función ahora devuelve la ruta de la foto
+    peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama, ruta_foto_dama = obtener_peso_y_costo(
+        df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper()
+    )
     monto_dama = 0.0
     monto_diamantes_dama = 0.0 
     costo_diamante_dama_final = 0.0
+    url_foto_dama = url_for('static', filename=obtener_nombre_archivo_imagen(ruta_foto_dama))
+
 
     if peso_base_dama > 0 and precio_onza is not None and kilates_dama in FACTOR_KILATES:
         
@@ -361,10 +376,14 @@ def formulario():
         monto_total_bruto += monto_dama
 
     # --- Caballero ---
-    peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab = obtener_peso_y_costo(df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper())
+    # MODIFICACIÓN: La función ahora devuelve la ruta de la foto
+    peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab, ruta_foto_cab = obtener_peso_y_costo(
+        df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper()
+    )
     monto_cab = 0.0
     monto_diamantes_cab = 0.0 
     costo_diamante_cab_final = 0.0
+    url_foto_cab = url_for('static', filename=obtener_nombre_archivo_imagen(ruta_foto_cab))
     
     if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         
@@ -492,7 +511,7 @@ def formulario():
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     logo_url = url_for('static', filename='logo.png')
     
-    # --- Lógica de Visibilidad de Secciones ---
+    # --- Lógica de Visibilidad de Secciones y Agregado de Imagen ---
     texto_seleccionado = t['seleccionar'].upper()
     
     modelo_dama_visible = modelo_dama != texto_seleccionado
@@ -503,14 +522,24 @@ def formulario():
         seccion_dama_html = f"""
             <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
             <div class="bg-pink-50 p-4 rounded-lg space-y-3">
-                <p class="text-sm font-medium text-gray-700">
-                    Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span>
-                    {' (' + metal_dama + ')' if metal_dama else ''}
-                </p>
-                {selectores_dama}
-                <span class="text-xs text-gray-500 block pt-2">
-                    {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD' + detalle_dama if monto_dama > 0 or ct_dama > 0 else 'Seleccione todos los detalles para calcular.'}
-                </span>
+                <div class="flex flex-col md:flex-row md:space-x-4">
+                    <div class="w-full md:w-1/3 flex items-start justify-center p-2">
+                        <img src="{url_foto_dama}" alt="Modelo {modelo_dama}" 
+                            class="w-full max-w-xs max-h-40 object-contain rounded-lg shadow-md"
+                            onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
+                        >
+                    </div>
+                    <div class="w-full md:w-2/3">
+                        <p class="text-sm font-medium text-gray-700">
+                            Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span>
+                            {' (' + metal_dama + ')' if metal_dama else ''}
+                        </p>
+                        {selectores_dama}
+                        <span class="text-xs text-gray-500 block pt-2">
+                            {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD' + detalle_dama if monto_dama > 0 or ct_dama > 0 else 'Seleccione todos los detalles para calcular.'}
+                        </span>
+                    </div>
+                </div>
             </div>
         """
         
@@ -519,14 +548,24 @@ def formulario():
         seccion_cab_html = f"""
             <h2 class="text-xl font-semibold pt-4 text-blue-700">Modelo {t['cab']}</h2>
             <div class="bg-blue-50 p-4 rounded-lg space-y-3">
-                <p class="text-sm font-medium text-gray-700">
-                    Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span>
-                    {' (' + metal_cab + ')' if metal_cab else ''}
-                </p>
-                {selectores_cab}
-                <span class="text-xs text-gray-500 block pt-2">
-                    {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 or ct_cab > 0 else 'Seleccione todos los detalles para calcular.'}
-                </span>
+                <div class="flex flex-col md:flex-row md:space-x-4">
+                     <div class="w-full md:w-1/3 flex items-start justify-center p-2">
+                        <img src="{url_foto_cab}" alt="Modelo {modelo_cab}" 
+                            class="w-full max-w-xs max-h-40 object-contain rounded-lg shadow-md"
+                            onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
+                        >
+                    </div>
+                    <div class="w-full md:w-2/3">
+                        <p class="text-sm font-medium text-gray-700">
+                            Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span>
+                            {' (' + metal_cab + ')' if metal_cab else ''}
+                        </p>
+                        {selectores_cab}
+                        <span class="text-xs text-gray-500 block pt-2">
+                            {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 or ct_cab > 0 else 'Seleccione todos los detalles para calcular.'}
+                        </span>
+                    </div>
+                </div>
             </div>
         """
     
@@ -733,16 +772,10 @@ def catalogo():
         """
           return render_template_string(html_catalogo)
 
-    df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL", "RUTA FOTO"])
+    # Nota: Aquí agrupamos por NAME, METAL y obtenemos la primera RUTA FOTO
+    df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL"])
     variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
     
-    def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-        if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-            return "placeholder.png" 
-        ruta_limpia = str(ruta_completa).replace('\\', '/')
-        nombre_archivo = os.path.basename(ruta_limpia).strip()
-        return unquote(nombre_archivo)
-        
     catalogo_items = []
     for _, fila in variantes_unicas.iterrows():
         modelo = str(fila["NAME"]).strip().upper()

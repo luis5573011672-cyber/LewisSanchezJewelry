@@ -9,7 +9,7 @@ PASOS PARA ACTUALIZAR CAMBIOS EN GIBHUB Y RENDER
 cd "C:\Users\sluis\Documents\Lewis\Formulario WEB"
 
 git add .
-git commit -m "Correcion Catalogo 3 "
+git commit -m "CAMBIO DE BOTON"
 
 SUBIR LOS CAMBIOS A GITHUB
 git push origin main 
