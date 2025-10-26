@@ -1,3 +1,4 @@
+#-----------------CODIGO FUNCIONANO MOSTRANDO FOTO PERO CON ERROR EN ANCHO----------------------
 import requests
 import os
 import pandas as pd
@@ -300,22 +301,17 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
 
-    # --- Opciones disponibles y Autoselección ---
-    def get_options(modelo: str, metal: str, genero: str) -> Tuple[List[str], List[str]]:
-        """Obtiene opciones de ANCHO y TALLA, filtrando ANCHO por MODELO, METAL y GENERO."""
-        if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal or not genero:
+    # --- Opciones disponibles y Autoselección (Misma lógica) ---
+    def get_options(modelo, metal):
+        if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal:
             return [], []
         
-        # Filtrar por Modelo, Metal Y Genero (CORRECCIÓN APLICADA AQUÍ)
-        filtro_base_options = (df["NAME"] == modelo) & \
-                              (df["METAL"] == metal) & \
-                              (df["GENERO"] == genero) 
+        filtro_base_options = (df["NAME"] == modelo) & (df["METAL"] == metal)
         
         def sort_numeric_key(value_str):
             try: return float(value_str)
             except ValueError: return float('inf') 
                 
-        # Los anchos ahora SÓLO incluyen los disponibles para ese género
         anchos_raw = df.loc[filtro_base_options, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric_key)
         
@@ -324,9 +320,8 @@ def formulario():
 
         return anchos, tallas
 
-    # Se llama a la función con el género específico:
-    anchos_d, tallas_d = get_options(modelo_dama, metal_dama, "DAMA")
-    anchos_c, tallas_c = get_options(modelo_cab, metal_cab, "CABALLERO")
+    anchos_d, tallas_d = get_options(modelo_dama, metal_dama)
+    anchos_c, tallas_c = get_options(modelo_cab, metal_cab)
 
     def auto_select(tipo, modelo, anchos, tallas):
         nonlocal ancho_dama, talla_dama, ancho_cab, talla_cab
@@ -335,11 +330,6 @@ def formulario():
                 if not ancho_dama and anchos:
                     ancho_dama = anchos[0]
                     session["ancho_dama"] = ancho_dama 
-                # Si el ancho actual ya no existe en la lista filtrada, reseteamos a la primera opción.
-                elif ancho_dama not in anchos and anchos:
-                     ancho_dama = anchos[0]
-                     session["ancho_dama"] = ancho_dama 
-                     
                 if not talla_dama and tallas:
                     talla_dama = tallas[0]
                     session["talla_dama"] = talla_dama 
@@ -347,11 +337,6 @@ def formulario():
                 if not ancho_cab and anchos:
                     ancho_cab = anchos[0]
                     session["ancho_cab"] = ancho_cab 
-                # Si el ancho actual ya no existe en la lista filtrada, reseteamos a la primera opción.
-                elif ancho_cab not in anchos and anchos:
-                     ancho_cab = anchos[0]
-                     session["ancho_cab"] = ancho_cab 
-                     
                 if not talla_cab and tallas:
                     talla_cab = tallas[0]
                     session["talla_cab"] = talla_cab 
@@ -393,6 +378,7 @@ def formulario():
         monto_total_bruto += monto_dama
 
     # --- Caballero ---
+    # La ruta de foto SÍ es buscada en obtener_peso_y_costo
     peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab, ruta_foto_cab = obtener_peso_y_costo(
         df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper()
     )
@@ -400,6 +386,7 @@ def formulario():
     monto_diamantes_cab = 0.0 
     costo_diamante_cab_final = 0.0
     
+    # Se calcula la URL del Caballero directamente con la ruta encontrada
     url_foto_cab = url_for('static', filename=obtener_nombre_archivo_imagen(ruta_foto_cab))
     
     if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
@@ -490,7 +477,7 @@ def formulario():
             """
 
         if not anchos or not tallas:
-            html_ancho_talla = f'<div class="w-full md:w-1/2"><p class="text-red-500 pt-3">No hay opciones de Ancho/Talla disponibles para esta combinación.</p></div>'
+            html_ancho_talla = f'<div class="w-full md:w-1/2"><p class="text-red-500 pt-3">No hay opciones de Ancho/Talla disponibles para esta combinación de Metal.</p></div>'
             return f"""
                 <div class="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 pt-4">
                     {kilates_selector}
