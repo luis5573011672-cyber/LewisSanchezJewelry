@@ -611,46 +611,57 @@ def formulario():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
-            .header-content {{ 
-                display: flex; 
-                align-items: center; 
-                justify-content: space-between; 
-                width: 100%;
-                margin-bottom: 1rem;
-            }}
-            .title-group {{
+            
+            /* --- Estilos para el Encabezado (Formulario Principal) --- */
+            .header-container {{
                 display: flex;
+                flex-direction: column;
                 align-items: center;
-                flex-grow: 1; 
+                text-align: center;
+                margin-bottom: 2rem;
+                position: relative; /* Para posicionar el selector de idioma */
             }}
-            .logo-img {{ 
-                height: 60px; 
-                margin-right: 15px; 
+            .header-container .logo-img {{
+                height: 100px; /* Logo más grande */
+                width: auto;
+                margin-bottom: 10px; /* Espacio entre logo y título */
             }}
-            @media (max-width: 640px) {{
-                .logo-img {{ height: 40px; }}
+            .header-container h1 {{
+                font-size: 2.5rem; /* Título más grande */
+                font-weight: 700; /* Negrita */
+                color: #1a202c; /* Color oscuro */
+                margin: 0;
             }}
-            h1 {{ 
-                flex-grow: 1; 
-                text-align: center; 
-                margin: 0; 
-            }} 
-            .language-selector-container {{
-                min-width: 120px; 
-                text-align: right;
+            .language-selector-absolute {{
+                position: absolute;
+                top: 0;
+                right: 0;
+                /* En pantallas pequeñas, moverlo para que no choque */
+                @media (max-width: 640px) {{
+                    position: static; /* Volver a flujo normal */
+                    margin-top: 1rem;
+                    width: 100%;
+                    text-align: center;
+                }}
             }}
+            @media (min-width: 640px) {{
+                .language-selector-absolute {{
+                    top: 15px; /* Ajuste para que esté un poco más bajo */
+                    right: 15px;
+                }}
+            }}
+            /* -------------------------------------------------------- */
+
         </style>
     </head>
     <body class="p-4 md:p-8 flex justify-center items-start min-h-screen">
         <div class="w-full max-w-4xl card p-6 md:p-10 mt-6">
             
             <form method="POST" action="/" class="space-y-4"> 
-                <div class="header-content">
+                <div class="header-container">
                     <img src="{url_for('static', filename='logo.png')}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
-                    <div class="title-group">
-                        <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
-                    </div>
-                    <div class="language-selector-container">
+                    <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
+                    <div class="language-selector-absolute">
                         <label for="idioma" class="sr-only">{t['cambiar_idioma']}</label>
                         <select id="idioma" name="idioma" class="p-2 border border-gray-300 rounded-lg text-sm" onchange="this.form.submit()">
                             <option value="Español" {"selected" if idioma == 'Español' else ""}>Español</option>
@@ -869,16 +880,29 @@ def catalogo():
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
             body {{ font-family: 'Inter', sans-serif; background-color: #f3f4f6; }}
             .card {{ background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }}
-            .title-container {{
+            
+            /* --- Estilos para el Encabezado (Catálogo) --- */
+            .header-catalogo {{
                 display: flex; 
+                flex-direction: column;
                 align-items: center; 
-                justify-content: center;
+                text-align: center;
                 margin-bottom: 2rem; 
+                padding-top: 1rem;
             }}
-            .logo-img {{ 
-                height: 60px; 
-                margin-right: 15px; 
+            .header-catalogo .logo-img {{
+                height: 100px; /* Logo más grande */
+                width: auto;
+                margin-bottom: 10px; /* Espacio entre logo y título */
             }}
+            .header-catalogo h1 {{ 
+                font-size: 2.5rem; /* Título más grande */
+                font-weight: 700; /* Negrita */
+                color: #1a202c; /* Color oscuro */
+                margin: 0;
+            }}
+            /* -------------------------------------------------------- */
+
             .selected-dama {{ border: 4px solid #EC4899; }} 
             .selected-cab {{ border: 4px solid #3B82F6; }} 
             .selected-both {{ border: 4px solid #10B981; }} 
@@ -887,10 +911,9 @@ def catalogo():
     <body class="p-4 md:p-8">
         <div class="max-w-7xl mx-auto">
             
-            <div class="title-container">
+            <div class="header-catalogo">
                 <img src="{logo_url}" alt="Logo" class="logo-img" onerror="this.style.display='none';" />
                 <h1 class="text-3xl font-extrabold text-gray-800">{t['titulo']}</h1>
-                <div style="width: 60px; margin-left: 15px;"></div> 
             </div>
             
             {f'<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-6 text-center" role="alert">{mensaje_exito}</div>' if mensaje_exito else ''}
