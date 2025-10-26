@@ -523,13 +523,7 @@ def formulario():
             <h2 class="text-xl font-semibold pt-4 text-pink-700">Modelo {t['dama']}</h2>
             <div class="bg-pink-50 p-4 rounded-lg space-y-3">
                 <div class="flex flex-col md:flex-row md:space-x-4">
-                    <div class="w-full md:w-1/3 flex items-start justify-center p-2">
-                        <img src="{url_foto_dama}" alt="Modelo {modelo_dama}" 
-                            class="w-full max-w-xs max-h-40 object-contain rounded-lg shadow-md"
-                            onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
-                        >
-                    </div>
-                    <div class="w-full md:w-2/3">
+                    <div class="w-full md:w-3/4"> 
                         <p class="text-sm font-medium text-gray-700">
                             Modelo: <span class="font-bold text-gray-900">{modelo_dama}</span>
                             {' (' + metal_dama + ')' if metal_dama else ''}
@@ -538,6 +532,12 @@ def formulario():
                         <span class="text-xs text-gray-500 block pt-2">
                             {'Monto Estimado BRUTO: $' + f'{monto_dama:,.2f}' + ' USD' + detalle_dama if monto_dama > 0 or ct_dama > 0 else 'Seleccione todos los detalles para calcular.'}
                         </span>
+                    </div>
+                    <div class="w-full md:w-1/4 flex items-start justify-end p-2"> 
+                        <img src="{url_foto_dama}" alt="Modelo {modelo_dama}" 
+                            class="w-auto h-auto max-h-24 max-w-full object-contain rounded-lg shadow-md" 
+                            onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
+                        >
                     </div>
                 </div>
             </div>
@@ -549,13 +549,7 @@ def formulario():
             <h2 class="text-xl font-semibold pt-4 text-blue-700">Modelo {t['cab']}</h2>
             <div class="bg-blue-50 p-4 rounded-lg space-y-3">
                 <div class="flex flex-col md:flex-row md:space-x-4">
-                     <div class="w-full md:w-1/3 flex items-start justify-center p-2">
-                        <img src="{url_foto_cab}" alt="Modelo {modelo_cab}" 
-                            class="w-full max-w-xs max-h-40 object-contain rounded-lg shadow-md"
-                            onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
-                        >
-                    </div>
-                    <div class="w-full md:w-2/3">
+                     <div class="w-full md:w-3/4"> 
                         <p class="text-sm font-medium text-gray-700">
                             Modelo: <span class="font-bold text-gray-900">{modelo_cab}</span>
                             {' (' + metal_cab + ')' if metal_cab else ''}
@@ -564,6 +558,12 @@ def formulario():
                         <span class="text-xs text-gray-500 block pt-2">
                             {'Monto Estimado BRUTO: $' + f'{monto_cab:,.2f}' + ' USD' + detalle_cab if monto_cab > 0 or ct_cab > 0 else 'Seleccione todos los detalles para calcular.'}
                         </span>
+                    </div>
+                    <div class="w-full md:w-1/4 flex items-start justify-end p-2"> 
+                        <img src="{url_foto_cab}" alt="Modelo {modelo_cab}" 
+                            class="w-auto h-auto max-h-24 max-w-full object-contain rounded-lg shadow-md"
+                            onerror="this.onerror=null;this.src='{url_for('static', filename='placeholder.png')}';"
+                        >
                     </div>
                 </div>
             </div>
@@ -731,7 +731,7 @@ def catalogo():
                 mensaje_exito = f"✅ ¡Modelo **{modelo} ({metal})** para **{tipo_display}** guardado! Seleccione el otro o presione 'Volver al Formulario'."
                 
             except ValueError:
-                logging.error("Error en el formato de selección del catálogo.")
+                logging.error("Error al procesar la selección.")
                 mensaje_exito = "❌ Error al procesar la selección."
 
 
