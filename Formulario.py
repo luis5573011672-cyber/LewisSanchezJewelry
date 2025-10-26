@@ -155,15 +155,11 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float, str]: 
     """
-    Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO.
-    
-    NOTA: Para CABALLERO, la ruta_foto retornada será una cadena vacía, ya que usaremos
-    la ruta de DAMA.
+    Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO (para ambos géneros).
     """
     
     global df_global 
     
-    # Si no hay selección válida, retornar valores por defecto.
     if df_global.empty or not all([modelo, metal, ancho, kilates, talla, genero]) or modelo == select_text:
         return 0.0, 0.0, 0.0, 0.0, "" 
         
@@ -185,11 +181,9 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
         price_cost = safe_float(base_fila.get("PRICE COST", 0))
         ct = safe_float(base_fila.get("CT", 0))
         
-        # Solo obtenemos la ruta de la foto si el género es DAMA
-        if genero == "DAMA":
-            ruta_foto = str(base_fila.get("RUTA FOTO", "")).strip()
-        # Para CABALLERO, la ruta_foto se deja vacía para usar la lógica de DAMA en Flask.
-    
+        # OBTENER RUTA FOTO PARA AMBOS GÉNEROS
+        ruta_foto = str(base_fila.get("RUTA FOTO", "")).strip() 
+
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
     cost_adicional = 0.0
     if not df_adicional_local.empty and "SIZE" in df_adicional_local.columns and "ADICIONAL" in df_adicional_local.columns:
@@ -383,8 +377,7 @@ def formulario():
         monto_total_bruto += monto_dama
 
     # --- Caballero ---
-    # Nota: ruta_foto_cab será una cadena vacía de obtener_peso_y_costo ya que se indicó
-    # que la búsqueda de la ruta solo se realiza para DAMA.
+    # La ruta de foto SÍ es buscada en obtener_peso_y_costo
     peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab, ruta_foto_cab = obtener_peso_y_costo(
         df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper()
     )
@@ -392,15 +385,8 @@ def formulario():
     monto_diamantes_cab = 0.0 
     costo_diamante_cab_final = 0.0
     
-    # === LÓGICA DE ASIGNACIÓN DE IMAGEN CORREGIDA AQUÍ ===
-    url_foto_cab = url_for('static', filename='placeholder.png')
-    
-    if modelo_dama == modelo_cab and metal_dama == metal_cab:
-        # Si los modelos de Dama y Caballero coinciden, asignamos la URL de la foto de Dama al Caballero.
-        url_foto_cab = url_foto_dama
-    # Si no coinciden, o si el modelo de dama no tiene foto (url_foto_dama es placeholder.png),
-    # url_foto_cab será placeholder.png por defecto.
-    # ====================================================
+    # Se calcula la URL del Caballero directamente con la ruta encontrada
+    url_foto_cab = url_for('static', filename=obtener_nombre_archivo_imagen(ruta_foto_cab))
     
     if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         
@@ -534,7 +520,7 @@ def formulario():
     modelo_dama_visible = modelo_dama != texto_seleccionado
     modelo_cab_visible = modelo_cab != texto_seleccionado
     
-    # === SECCIÓN DAMA (Imagen a la Derecha y Pequeña) ===
+    # === SECCIÓN DAMA ===
     seccion_dama_html = ""
     if modelo_dama_visible:
         seccion_dama_html = f"""
@@ -561,7 +547,7 @@ def formulario():
             </div>
         """
     
-    # === SECCIÓN CABALLERO (Imagen de Dama a la Derecha y Pequeña) ===
+    # === SECCIÓN CABALLERO ===
     seccion_cab_html = ""
     if modelo_cab_visible:
         seccion_cab_html = f"""
