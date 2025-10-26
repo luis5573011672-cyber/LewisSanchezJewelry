@@ -80,6 +80,7 @@ def safe_float(value) -> float:
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
     """Extrae el nombre del archivo de la ruta de Excel y lo decodifica."""
     if pd.isna(ruta_completa) or not str(ruta_completa).strip():
+        # Retorna el nombre del archivo placeholder si la ruta no es válida/existe
         return "placeholder.png" 
     ruta_limpia = str(ruta_completa).replace('\\', '/')
     nombre_archivo = os.path.basename(ruta_limpia).strip()
@@ -344,7 +345,6 @@ def formulario():
     # --- 2. Cálculos y Obtención de Rutas de Foto ---
     
     # --- Dama ---
-    # MODIFICACIÓN: La función ahora devuelve la ruta de la foto
     peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama, ruta_foto_dama = obtener_peso_y_costo(
         df_adicional, modelo_dama, metal_dama, ancho_dama, kilates_dama, talla_dama, "DAMA", t['seleccionar'].upper()
     )
@@ -376,7 +376,6 @@ def formulario():
         monto_total_bruto += monto_dama
 
     # --- Caballero ---
-    # MODIFICACIÓN: La función ahora devuelve la ruta de la foto
     peso_base_cab, cost_fijo_cab, cost_adicional_cab, ct_cab, ruta_foto_cab = obtener_peso_y_costo(
         df_adicional, modelo_cab, metal_cab, ancho_cab, kilates_cab, talla_cab, "CABALLERO", t['seleccionar'].upper()
     )
@@ -384,6 +383,16 @@ def formulario():
     monto_diamantes_cab = 0.0 
     costo_diamante_cab_final = 0.0
     url_foto_cab = url_for('static', filename=obtener_nombre_archivo_imagen(ruta_foto_cab))
+    
+    # === LÓGICA AGREGADA AQUÍ ===
+    # Si el modelo de Caballero y Dama son el mismo, y el modelo de Caballero no tiene foto, usar la de Dama.
+    placeholder_filename = obtener_nombre_archivo_imagen("")
+    
+    if modelo_dama == modelo_cab and metal_dama == metal_cab:
+        if obtener_nombre_archivo_imagen(ruta_foto_cab) == placeholder_filename:
+            # Reasignar la URL del caballero a la de la dama
+            url_foto_cab = url_foto_dama
+    # ============================
     
     if peso_base_cab > 0 and precio_onza is not None and kilates_cab in FACTOR_KILATES:
         
