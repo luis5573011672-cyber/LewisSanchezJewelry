@@ -32,7 +32,7 @@ ct_cache = {}
 API_KEY_GLOBAL = ""
 PRECIO_ONZA_CACHED = 0.0 
 FECHA_ONZA_CACHED = None 
-PORCENTAJE_EMPRESA_GLOBAL = 0.0 # <--- NUEVA VARIABLE PARA EL PORCENTAJE DE EMPRESA!N2
+PORCENTAJE_EMPRESA_GLOBAL = 0.0 # Valor raw leído de Empresa!N2
 
 
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
@@ -106,6 +106,7 @@ def obtener_precio_oro() -> Tuple[float, str]:
     # 1. Determinar el precio BASE (raw_base_price)
     raw_base_price = precio_actual_raw
     
+    # ... (Lógica de consulta a la API y actualización de H5/G5, se mantiene igual) ...
     # Si la fecha es de HOY, usar el precio cacheado/leído de H5.
     if fecha_actualizacion and fecha_actualizacion >= hoy:
         logging.info(f"Precio del oro tomado de Excel. Fecha de actualización: {fecha_actualizacion}.")
@@ -148,17 +149,30 @@ def obtener_precio_oro() -> Tuple[float, str]:
                 raw_base_price = precio_actual_raw if precio_actual_raw > 0 else DEFAULT_GOLD_PRICE
                 status = "fallback"
 
-    # 2. Aplicar el margen de Empresa!N2 (Cálculo NUEVO)
+    # 2. Aplicar el margen de Empresa!N2 (Cálculo CORREGIDO)
     precio_final = raw_base_price
-    porcentaje = PORCENTAJE_EMPRESA_GLOBAL
     
-    # Normalizar el porcentaje (si N2 tiene 15, lo convierte a 0.15)
-    if porcentaje > 1.0:
-        porcentaje /= 100.0
-        
-    if porcentaje > 0.0:
-        precio_final = raw_base_price * (1 + porcentaje)
-        logging.info(f"Margen Empresa!N2 ({PORCENTAJE_EMPRESA_GLOBAL:.2f}%) aplicado. Precio FINAL de onza: ${precio_final:,.2f}")
+    # Valor raw, puede ser 7 o 0.07. Lo normalizamos para el cálculo.
+    porcentaje_raw = PORCENTAJE_EMPRESA_GLOBAL 
+    
+    porcentaje_calculo = porcentaje_raw
+    porcentaje_display = porcentaje_raw
+    
+    if porcentaje_raw > 1.0:
+        # El valor es un entero (ej. 7)
+        porcentaje_calculo = porcentaje_raw / 100.0
+        porcentaje_display = porcentaje_raw
+    elif porcentaje_raw > 0.0 and porcentaje_raw <= 1.0:
+        # El valor es un decimal (ej. 0.07)
+        porcentaje_calculo = porcentaje_raw
+        porcentaje_display = porcentaje_raw * 100.0
+    
+    if porcentaje_calculo > 0.0:
+        precio_final = raw_base_price * (1 + porcentaje_calculo)
+        logging.info(f"Margen Empresa!N2 ({porcentaje_display:.2f}%) aplicado. Precio FINAL de onza: ${precio_final:,.2f}")
+    else:
+        # Si el valor es 0.0 o no se pudo calcular, porcentaje_display será 0.0
+        logging.info("Margen Empresa!N2 es 0%. Usando Precio BASE.")
 
     return precio_final, status
 
@@ -196,8 +210,9 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         # --- Lectura de la hoja EMPRESA (N2) ---
         ws_empresa = wb["EMPRESA"]
         porcentaje_raw = ws_empresa['N2'].value
-        PORCENTAJE_EMPRESA_GLOBAL = safe_float(porcentaje_raw)
-        logging.info(f"Porcentaje de Empresa!N2 cargado: {PORCENTAJE_EMPRESA_GLOBAL}")
+        # Cargamos el valor raw. openpyxl lo devuelve como decimal (0.07) si tiene formato %.
+        PORCENTAJE_EMPRESA_GLOBAL = safe_float(porcentaje_raw) 
+        logging.info(f"Valor raw de Empresa!N2 cargado: {PORCENTAJE_EMPRESA_GLOBAL}")
         # ---------------------------------------
 
         # 1. Cargar la hoja WEDDING BANDS (con pandas)
@@ -258,7 +273,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float, str]: 
     """Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO."""
-    # (El resto de esta función se mantiene sin cambios)
+    # (Esta función se mantiene sin cambios)
     global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, kilates, talla, genero]) or modelo == select_text:
@@ -306,11 +321,18 @@ def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
     # --- Carga de Datos y Precios ---
-    # La carga de datos ahora incluye la lectura de Empresa!N2
     df, df_adicional, costos_diamantes, ct_cache_local = cargar_datos()
     
     # obtener_precio_oro() ahora retorna el precio con el margen de Empresa!N2 incluido.
     precio_onza, status = obtener_precio_oro() 
+    
+    # Normalizar el valor de PORCENTAJE_EMPRESA_GLOBAL para el mensaje de visualización
+    porcentaje_display = PORCENTAJE_EMPRESA_GLOBAL
+    if porcentaje_display > 1.0:
+        porcentaje_display = PORCENTAJE_EMPRESA_GLOBAL
+    elif porcentaje_display > 0.0 and porcentaje_display <= 1.0:
+        porcentaje_display = PORCENTAJE_EMPRESA_GLOBAL * 100.0
+
     monto_total_bruto = 0.0
     
     monto_f3_diamante_laboratorio = costos_diamantes.get("laboratorio", 0.0)
@@ -625,7 +647,7 @@ def formulario():
     selectores_dama = generate_selectors("dama", modelo_dama, metal_dama, kilates_dama, anchos_d, tallas_d, ancho_dama, talla_dama, tipo_diamante_dama)
     selectores_cab = generate_selectors("cab", modelo_cab, metal_cab, kilates_cab, anchos_c, tallas_c, ancho_cab, talla_cab, tipo_diamante_cab)
     
-    precio_oro_status = f"Precio FINAL Onza Oro: ${precio_onza:,.2f} USD (Margen: {PORCENTAJE_EMPRESA_GLOBAL:.2f}%)"
+    precio_oro_status = f"Precio FINAL Onza Oro: ${precio_onza:,.2f} USD (Margen: {porcentaje_display:.2f}%)"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     logo_url = url_for('static', filename='logo.png')
     
