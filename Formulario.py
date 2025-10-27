@@ -6,6 +6,8 @@ import logging
 import math
 from urllib.parse import unquote
 from typing import Tuple, List, Dict
+import datetime
+import openpyxl 
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO)
@@ -26,27 +28,30 @@ df_adicional_global = pd.DataFrame()
 costos_diamantes_global = {} 
 ct_cache = {} # Nuevo caché para guardar el valor de CT por modelo para su uso en la UI
 
+# VARIABLES GLOBALES AÑADIDAS PARA LA LÓGICA DEL ORO (API/EXCEL)
+API_KEY_GLOBAL = ""
+PRECIO_ONZA_CACHED = 0.0 
+FECHA_ONZA_CACHED = None 
+
+
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
 
-def obtener_precio_oro() -> Tuple[float, str]:
-    """Obtiene el precio actual del oro (XAU/USD) por onza o usa un fallback."""
-    API_KEY = "goldapi-4g9e8p719mgvhodho-io" 
-    url = "https://www.goldapi.io/api/XAU/USD"
-    headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
-    
+def safe_float(value) -> float:
+    """Intenta convertir un valor a float de manera segura, retornando 0.0 en caso de error."""
     try:
-        response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        price = data.get("price")
-        
-        if price is not None and not math.isnan(price):
-            return float(price), "live"
-        return DEFAULT_GOLD_PRICE, "fallback"
-        
-    except (requests.exceptions.RequestException, Exception) as e:
-        logging.error(f"Error al obtener precio del oro: {e}. Usando fallback ({DEFAULT_GOLD_PRICE}).")
-        return DEFAULT_GOLD_PRICE, "fallback"
+        if pd.notna(value) and str(value).strip():
+            return float(str(value).strip())
+    except:
+        pass
+    return 0.0
+
+def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
+    """Extrae el nombre del archivo de la ruta de Excel y lo decodifica."""
+    if pd.isna(ruta_completa) or not str(ruta_completa).strip():
+        return "placeholder.png" 
+    ruta_limpia = str(ruta_completa).replace('\\', '/')
+    nombre_archivo = os.path.basename(ruta_limpia).strip()
+    return unquote(nombre_archivo)
 
 def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
     """
@@ -68,35 +73,112 @@ def calcular_monto_aproximado(monto_bruto: float) -> float:
     aproximado = math.ceil(monto_bruto / 10.0) * 10.0
     return aproximado
 
-def safe_float(value) -> float:
-    """Intenta convertir un valor a float de manera segura, retornando 0.0 en caso de error."""
+def actualizar_datos_excel(precio: float, fecha: datetime.date):
+    """Escribe el nuevo precio del oro en H5 y la fecha de actualización en G5 de la hoja SIZE."""
     try:
-        if pd.notna(value) and str(value).strip():
-            return float(str(value).strip())
-    except:
-        pass
-    return 0.0
+        # Cargar el workbook (manteniendo las fórmulas)
+        wb = openpyxl.load_workbook(EXCEL_PATH, keep_vba=True, data_only=False)
+        ws = wb["SIZE"] # Asumiendo que la hoja se llama SIZE
+        
+        # Escribir el valor en las celdas específicas
+        ws['H5'] = precio
+        ws['G5'] = fecha # openpyxl lo manejará como una fecha
+        
+        # Guardar el workbook
+        wb.save(EXCEL_PATH)
+        logging.info(f"Datos de oro guardados en Excel: Precio ${precio:,.2f}, Fecha {fecha}")
+        
+    except Exception as e:
+        logging.error(f"Error CRÍTICO al escribir en el archivo Excel: {e}")
+
+def obtener_precio_oro() -> Tuple[float, str]:
+    """
+    Obtiene el precio del oro:
+    1. Verifica la fecha en G5 (Excel) y si es HOY, usa el precio en H5.
+    2. Si es anterior, consulta la API (usando la Key de F5), actualiza H5/G5 y retorna el precio.
+    """
+    global API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED
     
-def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
-    """Extrae el nombre del archivo de la ruta de Excel y lo decodifica."""
-    if pd.isna(ruta_completa) or not str(ruta_completa).strip():
-        # Retorna el nombre del archivo placeholder si la ruta no es válida/existe
-        return "placeholder.png" 
-    ruta_limpia = str(ruta_completa).replace('\\', '/')
-    nombre_archivo = os.path.basename(ruta_limpia).strip()
-    return unquote(nombre_archivo)
+    precio_actual = PRECIO_ONZA_CACHED
+    fecha_actualizacion = FECHA_ONZA_CACHED
+    hoy = datetime.date.today()
+    status = "excel_cached"
+    
+    # --- 1. Verificar fecha ---
+    # Si la fecha es de HOY, usar el precio cacheado/leído de H5.
+    if fecha_actualizacion and fecha_actualizacion >= hoy:
+        logging.info(f"Precio del oro tomado de Excel. Fecha de actualización: {fecha_actualizacion}.")
+        return precio_actual, status
+
+    # --- 2. Si la fecha es antigua o no existe, consultar API ---
+    logging.info(f"Fecha en Excel es anterior ({fecha_actualizacion}). Consultando API...")
+    API_KEY = API_KEY_GLOBAL 
+    
+    if not API_KEY or API_KEY == '0.0':
+         logging.warning("API Key de GoldApi no encontrada en Excel. Usando fallback.")
+         return precio_actual if precio_actual > 0 else DEFAULT_GOLD_PRICE, "fallback"
+         
+    url = "https://www.goldapi.io/api/XAU/USD"
+    headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        price = data.get("price")
+        
+        if price is not None and not math.isnan(float(price)):
+            new_price = float(price)
+            # --- 3. Actualizar Excel y Caché ---
+            actualizar_datos_excel(new_price, hoy)
+            PRECIO_ONZA_CACHED = new_price
+            FECHA_ONZA_CACHED = hoy
+            logging.info(f"Precio del oro actualizado en Excel a ${new_price:,.2f}.")
+            return new_price, "live"
+        
+        # Si la API falla pero devuelve un resultado inválido, usamos el valor de H5 como fallback inmediato
+        logging.error(f"API devolvió precio inválido. Usando valor cacheado de H5/fallback: {precio_actual}.")
+        return precio_actual if precio_actual > 0 else DEFAULT_GOLD_PRICE, "fallback"
+        
+    except (requests.exceptions.RequestException, Exception) as e:
+        logging.error(f"Error al obtener precio del oro de la API: {e}. Usando valor cacheado de H5/fallback: {precio_actual}.")
+        return precio_actual if precio_actual > 0 else DEFAULT_GOLD_PRICE, "fallback"
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[str, float]]:
-    """Carga los DataFrames, costos de diamante y CTs por modelo (con caché)."""
-    global df_global, df_adicional_global, costos_diamantes_global, ct_cache
+    """Carga los DataFrames, costos de diamante y CTs por modelo (con caché), API KEY y precio/fecha de oro."""
+    global df_global, df_adicional_global, costos_diamantes_global, ct_cache, API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED
     
-    if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global and ct_cache:
+    # ----------------------------------------------------------------------------------------------------
+    # CAMBIO CRUCIAL: Solo recargar si no hay datos. Si ya hay datos, se usa el caché para evitar I/O repetido.
+    if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global and ct_cache and PRECIO_ONZA_CACHED > 0:
         return df_global, df_adicional_global, costos_diamantes_global, ct_cache
-
+    # ----------------------------------------------------------------------------------------------------
+    
     costos_diamantes = {"laboratorio": 0.0, "natural": 0.0}
     ct_cache_temp = {}
+    
     try:
-        # 1. Cargar la hoja WEDDING BANDS
+        # Usar openpyxl para leer API Key, Precio y Fecha de celdas específicas de SIZE
+        wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+        ws_size = wb["SIZE"]
+        
+        # Lectura de datos de la hoja SIZE (F5: API Key, H5: Precio, G5: Fecha)
+        api_key_raw = ws_size['F5'].value
+        precio_onza_raw = ws_size['H5'].value
+        fecha_onza_raw = ws_size['G5'].value
+        
+        # Asignar a variables globales
+        API_KEY_GLOBAL = str(api_key_raw).strip() if api_key_raw else ""
+        PRECIO_ONZA_CACHED = safe_float(precio_onza_raw)
+        
+        if isinstance(fecha_onza_raw, datetime.datetime):
+             FECHA_ONZA_CACHED = fecha_onza_raw.date()
+        elif isinstance(fecha_onza_raw, datetime.date):
+             FECHA_ONZA_CACHED = fecha_onza_raw
+        else:
+             FECHA_ONZA_CACHED = None 
+
+        # 1. Cargar la hoja WEDDING BANDS (con pandas)
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
         new_columns_df = df_raw.iloc[1].astype(str).str.strip().str.upper()
         df = df_raw.iloc[2:].copy()
@@ -104,14 +186,13 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         if 'WIDTH' in df.columns:
             df.rename(columns={'WIDTH': 'ANCHO'}, inplace=True)
             
-        # 2. Cargar la hoja SIZE
+        # 2. Cargar la hoja SIZE (con pandas para el resto de la data)
         df_adicional_raw = pd.read_excel(EXCEL_PATH, sheet_name="SIZE", engine="openpyxl", header=None)
         df_adicional_headers = df_adicional_raw.iloc[0].astype(str).str.strip().str.upper()
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = df_adicional_headers
         
         # 3. Extracción de Costos de Diamantes
-        
         if "MONTO F3" in df_adicional_headers:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
@@ -134,7 +215,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         if "ANCHO" in df.columns:
             df["ANCHO"] = df["ANCHO"].str.replace('MM', '', regex=False).str.strip()
             
-        # 5. Cachear CT por modelo para decidir si mostrar el selector
+        # 5. Cachear CT por modelo
         if "NAME" in df.columns and "CT" in df.columns:
              ct_group = df.groupby(["NAME", "ANCHO", "METAL", "CARAT", "GENERO"])["CT"].first().reset_index()
              for _, row in ct_group.iterrows():
@@ -205,14 +286,15 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
 def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
+    # --- Carga de Datos y Precios ---
     df, df_adicional, costos_diamantes, ct_cache_local = cargar_datos()
-    precio_onza, status = obtener_precio_oro()
+    precio_onza, status = obtener_precio_oro() # Aplica la nueva lógica de fecha/API/Excel
     monto_total_bruto = 0.0
     
     monto_f3_diamante_laboratorio = costos_diamantes.get("laboratorio", 0.0)
     monto_f3_diamante_natural = costos_diamantes.get("natural", 0.0)
     
-    # --- Carga de Idioma y Textos ---
+    # --- Carga de Idioma y Textos (Lógica sin cambios) ---
     idioma = request.form.get("idioma", session.get("idioma", "Español"))
     session["idioma"] = idioma 
     es = idioma == "Español"
@@ -257,7 +339,7 @@ def formulario():
         })
 
 
-    # --- Carga/Persistencia de Variables ---
+    # --- Carga/Persistencia de Variables (Lógica sin cambios) ---
     nombre_cliente = request.form.get("nombre_cliente", session.get("nombre_cliente", "")) 
     email_cliente = request.form.get("email_cliente", session.get("email_cliente", "")) 
     kilates_dama = request.form.get("kilates_dama", session.get("kilates_dama", "14"))
@@ -300,7 +382,7 @@ def formulario():
         ancho_cab = ""
         talla_cab = ""
 
-    # --- Opciones disponibles y Autoselección ---
+    # --- Opciones disponibles y Autoselección (Lógica sin cambios) ---
     def get_options(modelo: str, metal: str, genero: str) -> Tuple[List[str], List[str]]:
         """Obtiene opciones de ANCHO y TALLA, filtrando ANCHO por MODELO, METAL y GENERO."""
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal or not genero:
@@ -335,7 +417,6 @@ def formulario():
                 if not ancho_dama and anchos:
                     ancho_dama = anchos[0]
                     session["ancho_dama"] = ancho_dama 
-                # Si el ancho actual ya no existe en la lista filtrada, reseteamos a la primera opción.
                 elif ancho_dama not in anchos and anchos:
                      ancho_dama = anchos[0]
                      session["ancho_dama"] = ancho_dama 
@@ -347,7 +428,6 @@ def formulario():
                 if not ancho_cab and anchos:
                     ancho_cab = anchos[0]
                     session["ancho_cab"] = ancho_cab 
-                # Si el ancho actual ya no existe en la lista filtrada, reseteamos a la primera opción.
                 elif ancho_cab not in anchos and anchos:
                      ancho_cab = anchos[0]
                      session["ancho_cab"] = ancho_cab 
@@ -359,7 +439,7 @@ def formulario():
     auto_select("dama", modelo_dama, anchos_d, tallas_d)
     auto_select("cab", modelo_cab, anchos_c, tallas_c) 
 
-    # --- 2. Cálculos y Obtención de Rutas de Foto ---
+    # --- 2. Cálculos y Obtención de Rutas de Foto (Lógica sin cambios) ---
     
     # --- Dama ---
     peso_base_dama, cost_fijo_dama, cost_adicional_dama, ct_dama, ruta_foto_dama = obtener_peso_y_costo(
@@ -447,7 +527,7 @@ def formulario():
         return ct_cache_local.get(key.upper(), 0.0) > 0.0
 
 
-    # --------------------- Generación del HTML para el Formulario ---------------------
+    # --------------------- Generación del HTML para el Formulario (Lógica sin cambios) ---------------------
         
     def generate_selectors(tipo, modelo, metal, kilates_actual, anchos, tallas, ancho_actual, talla_actual, tipo_diamante_actual):
         
@@ -599,6 +679,7 @@ def formulario():
             </div>
         """
     
+    # --- Estructura HTML (con mejoras visuales) ---
     html_form = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
@@ -619,26 +700,25 @@ def formulario():
                 align-items: center;
                 text-align: center;
                 margin-bottom: 2rem;
-                position: relative; /* Para posicionar el selector de idioma */
+                position: relative; 
             }}
             .header-container .logo-img {{
-                height: 100px; /* Logo más grande */
+                height: 100px; 
                 width: auto;
-                margin-bottom: 10px; /* Espacio entre logo y título */
+                margin-bottom: 10px; 
             }}
             .header-container h1 {{
-                font-size: 2.5rem; /* Título más grande */
-                font-weight: 700; /* Negrita */
-                color: #1a202c; /* Color oscuro */
+                font-size: 2.5rem; 
+                font-weight: 700; 
+                color: #1a202c; 
                 margin: 0;
             }}
             .language-selector-absolute {{
                 position: absolute;
                 top: 0;
                 right: 0;
-                /* En pantallas pequeñas, moverlo para que no choque */
                 @media (max-width: 640px) {{
-                    position: static; /* Volver a flujo normal */
+                    position: static; 
                     margin-top: 1rem;
                     width: 100%;
                     text-align: center;
@@ -646,7 +726,7 @@ def formulario():
             }}
             @media (min-width: 640px) {{
                 .language-selector-absolute {{
-                    top: 15px; /* Ajuste para que esté un poco más bajo */
+                    top: 15px; 
                     right: 15px;
                 }}
             }}
@@ -891,14 +971,14 @@ def catalogo():
                 padding-top: 1rem;
             }}
             .header-catalogo .logo-img {{
-                height: 100px; /* Logo más grande */
+                height: 100px; 
                 width: auto;
-                margin-bottom: 10px; /* Espacio entre logo y título */
+                margin-bottom: 10px; 
             }}
             .header-catalogo h1 {{ 
-                font-size: 2.5rem; /* Título más grande */
-                font-weight: 700; /* Negrita */
-                color: #1a202c; /* Color oscuro */
+                font-size: 2.5rem; 
+                font-weight: 700; 
+                color: #1a202c; 
                 margin: 0;
             }}
             /* -------------------------------------------------------- */
@@ -947,4 +1027,5 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == "__main__":
+    # La recarga de datos en debug=True puede causar múltiples llamadas a la API si no está bien configurada
     app.run(debug=True)
