@@ -26,12 +26,13 @@ DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 costos_diamantes_global = {} 
-ct_cache = {} # Nuevo caché para guardar el valor de CT por modelo para su uso en la UI
+ct_cache = {} 
 
-# VARIABLES GLOBALES AÑADIDAS PARA LA LÓGICA DEL ORO (API/EXCEL)
+# VARIABLES GLOBALES PARA LA LÓGICA DEL ORO (API/EXCEL)
 API_KEY_GLOBAL = ""
 PRECIO_ONZA_CACHED = 0.0 
 FECHA_ONZA_CACHED = None 
+PORCENTAJE_EMPRESA_GLOBAL = 0.0 # <--- NUEVA VARIABLE PARA EL PORCENTAJE DE EMPRESA!N2
 
 
 # --------------------- FUNCIONES DE UTILIDAD ---------------------
@@ -56,6 +57,7 @@ def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
 def calcular_valor_gramo(valor_onza: float, pureza_factor: float, peso_gramos: float) -> Tuple[float, float]:
     """
     Calcula el valor del gramo de la aleación y el monto total de oro de la joya.
+    NOTA: valor_onza ya incluye el margen de Empresa!N2.
     """
     if valor_onza <= 0 or peso_gramos <= 0 or pureza_factor <= 0:
         return 0.0, 0.0
@@ -75,99 +77,112 @@ def calcular_monto_aproximado(monto_bruto: float) -> float:
 
 def actualizar_datos_excel(precio: float, fecha: datetime.date):
     """Escribe el nuevo precio del oro en H5 y la fecha de actualización en G5 de la hoja SIZE."""
+    # NOTA: Esta función DEBE recibir y escribir el precio BASE (sin margen de Empresa!N2)
     try:
-        # Cargar el workbook (manteniendo las fórmulas)
         wb = openpyxl.load_workbook(EXCEL_PATH, keep_vba=True, data_only=False)
-        ws = wb["SIZE"] # Asumiendo que la hoja se llama SIZE
+        ws = wb["SIZE"] 
         
-        # Escribir el valor en las celdas específicas
         ws['H5'] = precio
-        ws['G5'] = fecha # openpyxl lo manejará como una fecha
+        ws['G5'] = fecha 
         
-        # Guardar el workbook
         wb.save(EXCEL_PATH)
-        logging.info(f"Datos de oro guardados en Excel: Precio ${precio:,.2f}, Fecha {fecha}")
+        logging.info(f"Datos de oro guardados en Excel: Precio BASE ${precio:,.2f}, Fecha {fecha}")
         
     except Exception as e:
         logging.error(f"Error CRÍTICO al escribir en el archivo Excel: {e}")
 
 def obtener_precio_oro() -> Tuple[float, str]:
     """
-    Obtiene el precio del oro:
-    1. Verifica la fecha en G5 (Excel) y si es HOY, usa el precio en H5.
-    2. Si es anterior, consulta la API (usando la Key de F5), actualiza H5/G5 y retorna el precio.
+    Obtiene el precio del oro base (API/H5) y luego aplica el porcentaje de Empresa!N2.
+    Retorna el precio FINAL (con margen).
     """
-    global API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED
+    global API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED, PORCENTAJE_EMPRESA_GLOBAL
     
-    precio_actual = PRECIO_ONZA_CACHED
+    precio_actual_raw = PRECIO_ONZA_CACHED
     fecha_actualizacion = FECHA_ONZA_CACHED
     hoy = datetime.date.today()
     status = "excel_cached"
     
-    # --- 1. Verificar fecha ---
+    # 1. Determinar el precio BASE (raw_base_price)
+    raw_base_price = precio_actual_raw
+    
     # Si la fecha es de HOY, usar el precio cacheado/leído de H5.
     if fecha_actualizacion and fecha_actualizacion >= hoy:
         logging.info(f"Precio del oro tomado de Excel. Fecha de actualización: {fecha_actualizacion}.")
-        return precio_actual, status
+        status = "excel_cached"
+    else:
+        # Si la fecha es antigua o no existe, consultar API
+        logging.info(f"Fecha en Excel es anterior ({fecha_actualizacion}). Consultando API...")
+        API_KEY = API_KEY_GLOBAL 
+        
+        if not API_KEY or API_KEY == '0.0':
+             logging.warning("API Key de GoldApi no encontrada en Excel. Usando fallback.")
+             raw_base_price = precio_actual_raw if precio_actual_raw > 0 else DEFAULT_GOLD_PRICE
+             status = "fallback"
+        else:
+            url = "https://www.goldapi.io/api/XAU/USD"
+            headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
+            
+            try:
+                response = requests.get(url, headers=headers, timeout=5)
+                response.raise_for_status()
+                data = response.json()
+                price = data.get("price")
+                
+                if price is not None and not math.isnan(float(price)):
+                    new_price = float(price)
+                    # Actualizar Excel (siempre guardamos el precio BASE)
+                    actualizar_datos_excel(new_price, hoy)
+                    PRECIO_ONZA_CACHED = new_price
+                    FECHA_ONZA_CACHED = hoy
+                    raw_base_price = new_price
+                    status = "live"
+                    logging.info(f"Precio BASE del oro actualizado a ${new_price:,.2f}.")
+                else:
+                    logging.error(f"API devolvió precio inválido. Usando valor cacheado de H5/fallback: {precio_actual_raw}.")
+                    raw_base_price = precio_actual_raw if precio_actual_raw > 0 else DEFAULT_GOLD_PRICE
+                    status = "fallback"
+                    
+            except (requests.exceptions.RequestException, Exception) as e:
+                logging.error(f"Error al obtener precio del oro de la API: {e}. Usando valor cacheado de H5/fallback: {precio_actual_raw}.")
+                raw_base_price = precio_actual_raw if precio_actual_raw > 0 else DEFAULT_GOLD_PRICE
+                status = "fallback"
 
-    # --- 2. Si la fecha es antigua o no existe, consultar API ---
-    logging.info(f"Fecha en Excel es anterior ({fecha_actualizacion}). Consultando API...")
-    API_KEY = API_KEY_GLOBAL 
+    # 2. Aplicar el margen de Empresa!N2 (Cálculo NUEVO)
+    precio_final = raw_base_price
+    porcentaje = PORCENTAJE_EMPRESA_GLOBAL
     
-    if not API_KEY or API_KEY == '0.0':
-         logging.warning("API Key de GoldApi no encontrada en Excel. Usando fallback.")
-         return precio_actual if precio_actual > 0 else DEFAULT_GOLD_PRICE, "fallback"
-         
-    url = "https://www.goldapi.io/api/XAU/USD"
-    headers = {"x-access-token": API_KEY, "Content-Type": "application/json"}
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        price = data.get("price")
+    # Normalizar el porcentaje (si N2 tiene 15, lo convierte a 0.15)
+    if porcentaje > 1.0:
+        porcentaje /= 100.0
         
-        if price is not None and not math.isnan(float(price)):
-            new_price = float(price)
-            # --- 3. Actualizar Excel y Caché ---
-            actualizar_datos_excel(new_price, hoy)
-            PRECIO_ONZA_CACHED = new_price
-            FECHA_ONZA_CACHED = hoy
-            logging.info(f"Precio del oro actualizado en Excel a ${new_price:,.2f}.")
-            return new_price, "live"
-        
-        # Si la API falla pero devuelve un resultado inválido, usamos el valor de H5 como fallback inmediato
-        logging.error(f"API devolvió precio inválido. Usando valor cacheado de H5/fallback: {precio_actual}.")
-        return precio_actual if precio_actual > 0 else DEFAULT_GOLD_PRICE, "fallback"
-        
-    except (requests.exceptions.RequestException, Exception) as e:
-        logging.error(f"Error al obtener precio del oro de la API: {e}. Usando valor cacheado de H5/fallback: {precio_actual}.")
-        return precio_actual if precio_actual > 0 else DEFAULT_GOLD_PRICE, "fallback"
+    if porcentaje > 0.0:
+        precio_final = raw_base_price * (1 + porcentaje)
+        logging.info(f"Margen Empresa!N2 ({PORCENTAJE_EMPRESA_GLOBAL:.2f}%) aplicado. Precio FINAL de onza: ${precio_final:,.2f}")
+
+    return precio_final, status
+
 
 def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[str, float]]:
-    """Carga los DataFrames, costos de diamante y CTs por modelo (con caché), API KEY y precio/fecha de oro."""
-    global df_global, df_adicional_global, costos_diamantes_global, ct_cache, API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED
+    """Carga los DataFrames, costos de diamante, CTs, API KEY, precio/fecha de oro, y porcentaje de Empresa!N2."""
+    global df_global, df_adicional_global, costos_diamantes_global, ct_cache, API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED, PORCENTAJE_EMPRESA_GLOBAL
     
-    # ----------------------------------------------------------------------------------------------------
-    # CAMBIO CRUCIAL: Solo recargar si no hay datos. Si ya hay datos, se usa el caché para evitar I/O repetido.
     if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global and ct_cache and PRECIO_ONZA_CACHED > 0:
         return df_global, df_adicional_global, costos_diamantes_global, ct_cache
-    # ----------------------------------------------------------------------------------------------------
-    
+
     costos_diamantes = {"laboratorio": 0.0, "natural": 0.0}
     ct_cache_temp = {}
     
     try:
-        # Usar openpyxl para leer API Key, Precio y Fecha de celdas específicas de SIZE
+        # Usar openpyxl para leer API Key, Precio, Fecha de celdas específicas y el nuevo porcentaje
         wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
-        ws_size = wb["SIZE"]
         
-        # Lectura de datos de la hoja SIZE (F5: API Key, H5: Precio, G5: Fecha)
+        # --- Lectura de la hoja SIZE ---
+        ws_size = wb["SIZE"]
         api_key_raw = ws_size['F5'].value
         precio_onza_raw = ws_size['H5'].value
         fecha_onza_raw = ws_size['G5'].value
         
-        # Asignar a variables globales
         API_KEY_GLOBAL = str(api_key_raw).strip() if api_key_raw else ""
         PRECIO_ONZA_CACHED = safe_float(precio_onza_raw)
         
@@ -177,6 +192,13 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
              FECHA_ONZA_CACHED = fecha_onza_raw
         else:
              FECHA_ONZA_CACHED = None 
+
+        # --- Lectura de la hoja EMPRESA (N2) ---
+        ws_empresa = wb["EMPRESA"]
+        porcentaje_raw = ws_empresa['N2'].value
+        PORCENTAJE_EMPRESA_GLOBAL = safe_float(porcentaje_raw)
+        logging.info(f"Porcentaje de Empresa!N2 cargado: {PORCENTAJE_EMPRESA_GLOBAL}")
+        # ---------------------------------------
 
         # 1. Cargar la hoja WEDDING BANDS (con pandas)
         df_raw = pd.read_excel(EXCEL_PATH, sheet_name="WEDDING BANDS", engine="openpyxl", header=None)
@@ -192,7 +214,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = df_adicional_headers
         
-        # 3. Extracción de Costos de Diamantes
+        # 3. Extracción de Costos de Diamantes (Mismo código anterior)
         if "MONTO F3" in df_adicional_headers:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
@@ -207,7 +229,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         costos_diamantes["laboratorio"] = safe_float(monto_laboratorio_raw)
         costos_diamantes["natural"] = safe_float(monto_natural_raw)
         
-        # 4. Limpieza y estandarización
+        # 4. Limpieza y estandarización (Mismo código anterior)
         cols_to_strip = ["NAME", "METAL", "RUTA FOTO", "PESO", "GENERO", "CT", "ANCHO", "CARAT"] 
         for col in cols_to_strip:
             if col in df.columns:
@@ -215,7 +237,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         if "ANCHO" in df.columns:
             df["ANCHO"] = df["ANCHO"].str.replace('MM', '', regex=False).str.strip()
             
-        # 5. Cachear CT por modelo
+        # 5. Cachear CT por modelo (Mismo código anterior)
         if "NAME" in df.columns and "CT" in df.columns:
              ct_group = df.groupby(["NAME", "ANCHO", "METAL", "CARAT", "GENERO"])["CT"].first().reset_index()
              for _, row in ct_group.iterrows():
@@ -235,10 +257,8 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
 
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float, str]: 
-    """
-    Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO (para ambos géneros).
-    """
-    
+    """Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO."""
+    # (El resto de esta función se mantiene sin cambios)
     global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, kilates, talla, genero]) or modelo == select_text:
@@ -262,7 +282,6 @@ def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: s
         price_cost = safe_float(base_fila.get("PRICE COST", 0))
         ct = safe_float(base_fila.get("CT", 0))
         
-        # OBTENER RUTA FOTO PARA AMBOS GÉNEROS
         ruta_foto = str(base_fila.get("RUTA FOTO", "")).strip() 
 
     # 2. Buscar el COSTO ADICIONAL por TALLA en df_adicional_local (Hoja SIZE)
@@ -287,8 +306,11 @@ def formulario():
     """Ruta principal: maneja datos de cliente, selección de Kilates, Ancho, Talla y cálculo."""
     
     # --- Carga de Datos y Precios ---
+    # La carga de datos ahora incluye la lectura de Empresa!N2
     df, df_adicional, costos_diamantes, ct_cache_local = cargar_datos()
-    precio_onza, status = obtener_precio_oro() # Aplica la nueva lógica de fecha/API/Excel
+    
+    # obtener_precio_oro() ahora retorna el precio con el margen de Empresa!N2 incluido.
+    precio_onza, status = obtener_precio_oro() 
     monto_total_bruto = 0.0
     
     monto_f3_diamante_laboratorio = costos_diamantes.get("laboratorio", 0.0)
@@ -388,7 +410,6 @@ def formulario():
         if df.empty or df_adicional.empty or modelo == t['seleccionar'].upper() or not metal or not genero:
             return [], []
         
-        # Filtrar por Modelo, Metal Y Genero (CORRECCIÓN APLICADA AQUÍ)
         filtro_base_options = (df["NAME"] == modelo) & \
                               (df["METAL"] == metal) & \
                               (df["GENERO"] == genero) 
@@ -397,7 +418,6 @@ def formulario():
             try: return float(value_str)
             except ValueError: return float('inf') 
                 
-        # Los anchos ahora SÓLO incluyen los disponibles para ese género
         anchos_raw = df.loc[filtro_base_options, "ANCHO"].astype(str).str.strip().unique().tolist() if "ANCHO" in df.columns else []
         anchos = sorted(anchos_raw, key=sort_numeric_key)
         
@@ -406,7 +426,6 @@ def formulario():
 
         return anchos, tallas
 
-    # Se llama a la función con el género específico:
     anchos_d, tallas_d = get_options(modelo_dama, metal_dama, "DAMA")
     anchos_c, tallas_c = get_options(modelo_cab, metal_cab, "CABALLERO")
 
@@ -460,6 +479,7 @@ def formulario():
         else:
             costo_diamante_dama_final = monto_f3_diamante_laboratorio
 
+        # La función calcular_valor_gramo ya usa el precio_onza (que tiene el margen)
         _, monto_oro_dama = calcular_valor_gramo(precio_onza, factor_pureza_dama, peso_base_dama)
         
         if ct_dama > 0 and costo_diamante_dama_final > 0:
@@ -491,6 +511,7 @@ def formulario():
         else:
             costo_diamante_cab_final = monto_f3_diamante_laboratorio
         
+        # La función calcular_valor_gramo ya usa el precio_onza (que tiene el margen)
         _, monto_oro_cab = calcular_valor_gramo(precio_onza, factor_pureza_cab, peso_base_cab)
         
         if ct_cab > 0 and costo_diamante_cab_final > 0:
@@ -604,7 +625,7 @@ def formulario():
     selectores_dama = generate_selectors("dama", modelo_dama, metal_dama, kilates_dama, anchos_d, tallas_d, ancho_dama, talla_dama, tipo_diamante_dama)
     selectores_cab = generate_selectors("cab", modelo_cab, metal_cab, kilates_cab, anchos_c, tallas_c, ancho_cab, talla_cab, tipo_diamante_cab)
     
-    precio_oro_status = f"Precio Oro Onza: ${precio_onza:,.2f} USD ({status.upper()})"
+    precio_oro_status = f"Precio FINAL Onza Oro: ${precio_onza:,.2f} USD (Margen: {PORCENTAJE_EMPRESA_GLOBAL:.2f}%)"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     logo_url = url_for('static', filename='logo.png')
     
@@ -882,7 +903,6 @@ def catalogo():
         """
           return render_template_string(html_catalogo)
 
-    # Nota: Aquí agrupamos por NAME, METAL y obtenemos la primera RUTA FOTO
     df_catalogo = df[["NAME", "METAL", "RUTA FOTO"]].dropna(subset=["NAME", "METAL"])
     variantes_unicas = df_catalogo.drop_duplicates(subset=['NAME', 'METAL'])
     
@@ -1027,5 +1047,4 @@ def catalogo():
     return render_template_string(html_catalogo)
 
 if __name__ == "__main__":
-    # La recarga de datos en debug=True puede causar múltiples llamadas a la API si no está bien configurada
     app.run(debug=True)
