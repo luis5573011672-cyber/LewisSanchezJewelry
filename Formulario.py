@@ -14,21 +14,17 @@ logging.basicConfig(level=logging.INFO)
 
 # --- CONFIGURACIÓN GLOBAL ---
 app = Flask(__name__)
-# Es CRUCIAL que la clave secreta se establezca para que las sesiones funcionen.
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "una_clave_secreta_fuerte_aqui_para_testing") 
 
 EXCEL_PATH = "Formulario Catalogo.xlsm" 
-# Factores de pureza (Kilates / 24)
 FACTOR_KILATES = {"22": 0.9167, "18": 0.75, "14": 0.5833, "10": 0.4167}
-DEFAULT_GOLD_PRICE = 5600.00 # USD por Onza (Valor por defecto/fallback)
+DEFAULT_GOLD_PRICE = 5600.00 
 
-# Variables globales para los DataFrames (Caché)
 df_global = pd.DataFrame()
 df_adicional_global = pd.DataFrame()
 costos_diamantes_global = {} 
 ct_cache = {} 
 
-# VARIABLES GLOBALES PARA LA LÓGICA DEL ORO (API/EXCEL)
 API_KEY_GLOBAL = ""
 PRECIO_ONZA_CACHED = 0.0 
 FECHA_ONZA_CACHED = None 
@@ -40,10 +36,24 @@ PORCENTAJE_EMPRESA_GLOBAL = 0.0 # Valor raw leído de Empresa!N2
 def safe_float(value) -> float:
     """Intenta convertir un valor a float de manera segura, retornando 0.0 en caso de error."""
     try:
-        if pd.notna(value) and str(value).strip():
-            return float(str(value).strip())
+        if pd.notna(value):
+            # 1. Convertir a string y limpiar espacios
+            s = str(value).strip()
+            
+            # 2. Eliminar el símbolo de porcentaje si existe
+            if '%' in s:
+                s = s.replace('%', '')
+            
+            # 3. Si queda algo, convertir a float
+            if s:
+                return float(s)
+            
+        if isinstance(value, (int, float)):
+            return float(value)
+            
     except:
         pass
+        
     return 0.0
 
 def obtener_nombre_archivo_imagen(ruta_completa: str) -> str:
@@ -79,6 +89,7 @@ def actualizar_datos_excel(precio: float, fecha: datetime.date):
     """Escribe el nuevo precio del oro en H5 y la fecha de actualización en G5 de la hoja SIZE."""
     # NOTA: Esta función DEBE recibir y escribir el precio BASE (sin margen de Empresa!N2)
     try:
+        # data_only=False es crucial aquí para que openpyxl no intente sobrescribir fórmulas con valores.
         wb = openpyxl.load_workbook(EXCEL_PATH, keep_vba=True, data_only=False)
         ws = wb["SIZE"] 
         
@@ -106,13 +117,11 @@ def obtener_precio_oro() -> Tuple[float, str]:
     # 1. Determinar el precio BASE (raw_base_price)
     raw_base_price = precio_actual_raw
     
-    # ... (Lógica de consulta a la API y actualización de H5/G5, se mantiene igual) ...
-    # Si la fecha es de HOY, usar el precio cacheado/leído de H5.
+    # Lógica de consulta a la API y actualización de H5/G5... (Se mantiene)
     if fecha_actualizacion and fecha_actualizacion >= hoy:
         logging.info(f"Precio del oro tomado de Excel. Fecha de actualización: {fecha_actualizacion}.")
         status = "excel_cached"
     else:
-        # Si la fecha es antigua o no existe, consultar API
         logging.info(f"Fecha en Excel es anterior ({fecha_actualizacion}). Consultando API...")
         API_KEY = API_KEY_GLOBAL 
         
@@ -132,7 +141,6 @@ def obtener_precio_oro() -> Tuple[float, str]:
                 
                 if price is not None and not math.isnan(float(price)):
                     new_price = float(price)
-                    # Actualizar Excel (siempre guardamos el precio BASE)
                     actualizar_datos_excel(new_price, hoy)
                     PRECIO_ONZA_CACHED = new_price
                     FECHA_ONZA_CACHED = hoy
@@ -152,11 +160,10 @@ def obtener_precio_oro() -> Tuple[float, str]:
     # 2. Aplicar el margen de Empresa!N2 (Cálculo CORREGIDO)
     precio_final = raw_base_price
     
-    # Valor raw, puede ser 7 o 0.07. Lo normalizamos para el cálculo.
     porcentaje_raw = PORCENTAJE_EMPRESA_GLOBAL 
     
-    porcentaje_calculo = porcentaje_raw
-    porcentaje_display = porcentaje_raw
+    porcentaje_calculo = 0.0
+    porcentaje_display = 0.0
     
     if porcentaje_raw > 1.0:
         # El valor es un entero (ej. 7)
@@ -166,13 +173,16 @@ def obtener_precio_oro() -> Tuple[float, str]:
         # El valor es un decimal (ej. 0.07)
         porcentaje_calculo = porcentaje_raw
         porcentaje_display = porcentaje_raw * 100.0
-    
+    # Caso 3: Es 0.0 o un valor muy cercano, permanece como 0.0 (porcentaje_calculo/display=0.0)
+
     if porcentaje_calculo > 0.0:
         precio_final = raw_base_price * (1 + porcentaje_calculo)
+        # Usamos el valor normalizado para el log
         logging.info(f"Margen Empresa!N2 ({porcentaje_display:.2f}%) aplicado. Precio FINAL de onza: ${precio_final:,.2f}")
     else:
-        # Si el valor es 0.0 o no se pudo calcular, porcentaje_display será 0.0
-        logging.info("Margen Empresa!N2 es 0%. Usando Precio BASE.")
+        # Aseguramos que si es 0, se muestre 0.00%
+        porcentaje_display = 0.0
+        logging.info(f"Margen Empresa!N2 es {porcentaje_display:.2f}% o no se pudo leer. Usando Precio BASE.")
 
     return precio_final, status
 
@@ -181,7 +191,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
     """Carga los DataFrames, costos de diamante, CTs, API KEY, precio/fecha de oro, y porcentaje de Empresa!N2."""
     global df_global, df_adicional_global, costos_diamantes_global, ct_cache, API_KEY_GLOBAL, PRECIO_ONZA_CACHED, FECHA_ONZA_CACHED, PORCENTAJE_EMPRESA_GLOBAL
     
-    if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global and ct_cache and PRECIO_ONZA_CACHED > 0:
+    if not df_global.empty and not df_adicional_global.empty and costos_diamantes_global and ct_cache and PRECIO_ONZA_CACHED > 0 and PORCENTAJE_EMPRESA_GLOBAL > -1:
         return df_global, df_adicional_global, costos_diamantes_global, ct_cache
 
     costos_diamantes = {"laboratorio": 0.0, "natural": 0.0}
@@ -189,6 +199,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
     
     try:
         # Usar openpyxl para leer API Key, Precio, Fecha de celdas específicas y el nuevo porcentaje
+        # data_only=True: Devuelve el valor final de las fórmulas, no la fórmula en sí.
         wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
         
         # --- Lectura de la hoja SIZE ---
@@ -208,11 +219,39 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
              FECHA_ONZA_CACHED = None 
 
         # --- Lectura de la hoja EMPRESA (N2) ---
-        ws_empresa = wb["EMPRESA"]
-        porcentaje_raw = ws_empresa['N2'].value
-        # Cargamos el valor raw. openpyxl lo devuelve como decimal (0.07) si tiene formato %.
-        PORCENTAJE_EMPRESA_GLOBAL = safe_float(porcentaje_raw) 
-        logging.info(f"Valor raw de Empresa!N2 cargado: {PORCENTAJE_EMPRESA_GLOBAL}")
+        target_sheet_name = "Empresa"
+        ws_empresa = None
+        
+        # Iterar sobre las hojas para encontrar la que coincide, ignorando capitalización y espacios
+        for sheetname in wb.sheetnames:
+            if sheetname.strip().lower() == target_sheet_name.lower():
+                ws_empresa = wb[sheetname]
+                logging.info(f"Hoja EMPRESA encontrada con nombre real: {sheetname}")
+                break
+        
+        if ws_empresa is None:
+            # Si no se encuentra, registramos el error y usamos 0.0
+            logging.error(f"Error CRÍTICO: No se encontró una hoja llamada '{target_sheet_name}' (o similar). Hojas disponibles: {wb.sheetnames}")
+            PORCENTAJE_EMPRESA_GLOBAL = 0.0
+            pass 
+        else:
+            # Si la hoja se encuentra, procedemos a leer la celda N2
+            porcentaje_raw_value = ws_empresa['N2'].value
+            
+            # DEBUG: Loguear el valor crudo leído de la celda N2
+            logging.info(f"Valor CRUDO leído de {target_sheet_name}!N2: {porcentaje_raw_value} (Tipo: {type(porcentaje_raw_value)})")
+            
+            # Usamos safe_float 
+            PORCENTAJE_EMPRESA_GLOBAL = safe_float(porcentaje_raw_value) 
+            
+            # Normalizar la visualización del porcentaje para el log
+            porcentaje_display_log = PORCENTAJE_EMPRESA_GLOBAL
+            if porcentaje_display_log > 1.0:
+                 pass # Ya está en valor entero (ej. 7)
+            elif porcentaje_display_log > 0.0 and porcentaje_display_log <= 1.0:
+                 porcentaje_display_log = PORCENTAJE_EMPRESA_GLOBAL * 100.0
+            
+            logging.info(f"Valor NUMÉRICO (PORCENTAJE_EMPRESA_GLOBAL) cargado: {porcentaje_display_log:.2f}")
         # ---------------------------------------
 
         # 1. Cargar la hoja WEDDING BANDS (con pandas)
@@ -229,7 +268,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         df_adicional = df_adicional_raw.iloc[1:].copy()
         df_adicional.columns = df_adicional_headers
         
-        # 3. Extracción de Costos de Diamantes (Mismo código anterior)
+        # 3. Extracción de Costos de Diamantes 
         if "MONTO F3" in df_adicional_headers:
              df_adicional.rename(columns={'MONTO F3': 'MONTO'}, inplace=True)
         
@@ -244,7 +283,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         costos_diamantes["laboratorio"] = safe_float(monto_laboratorio_raw)
         costos_diamantes["natural"] = safe_float(monto_natural_raw)
         
-        # 4. Limpieza y estandarización (Mismo código anterior)
+        # 4. Limpieza y estandarización 
         cols_to_strip = ["NAME", "METAL", "RUTA FOTO", "PESO", "GENERO", "CT", "ANCHO", "CARAT"] 
         for col in cols_to_strip:
             if col in df.columns:
@@ -252,7 +291,7 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         if "ANCHO" in df.columns:
             df["ANCHO"] = df["ANCHO"].str.replace('MM', '', regex=False).str.strip()
             
-        # 5. Cachear CT por modelo (Mismo código anterior)
+        # 5. Cachear CT por modelo 
         if "NAME" in df.columns and "CT" in df.columns:
              ct_group = df.groupby(["NAME", "ANCHO", "METAL", "CARAT", "GENERO"])["CT"].first().reset_index()
              for _, row in ct_group.iterrows():
@@ -267,13 +306,12 @@ def cargar_datos() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], Dict[s
         return df, df_adicional, costos_diamantes, ct_cache
         
     except Exception as e:
-        logging.error(f"Error CRÍTICO al leer el archivo Excel: {e}") 
+        # Aquí capturamos cualquier otro error de carga, pero el de 'Empresa' ya está manejado arriba
+        logging.error(f"Error CRÍTICO al leer el archivo Excel (excepto la hoja Empresa): {e}") 
         return pd.DataFrame(), pd.DataFrame(), costos_diamantes, ct_cache_temp
 
 
 def obtener_peso_y_costo(df_adicional_local: pd.DataFrame, modelo: str, metal: str, ancho: str, kilates: str, talla: str, genero: str, select_text: str) -> Tuple[float, float, float, float, str]: 
-    """Busca peso BASE, costos fijo/adicional (por talla), CT y RUTA FOTO."""
-    # (Esta función se mantiene sin cambios)
     global df_global 
     
     if df_global.empty or not all([modelo, metal, ancho, kilates, talla, genero]) or modelo == select_text:
@@ -328,10 +366,16 @@ def formulario():
     
     # Normalizar el valor de PORCENTAJE_EMPRESA_GLOBAL para el mensaje de visualización
     porcentaje_display = PORCENTAJE_EMPRESA_GLOBAL
+    
     if porcentaje_display > 1.0:
-        porcentaje_display = PORCENTAJE_EMPRESA_GLOBAL
+        # Si es 7.0, se queda en 7.0
+        pass 
     elif porcentaje_display > 0.0 and porcentaje_display <= 1.0:
+        # Si es 0.07, se multiplica a 7.0
         porcentaje_display = PORCENTAJE_EMPRESA_GLOBAL * 100.0
+    else:
+        # Si es 0.0
+        porcentaje_display = 0.0
 
     monto_total_bruto = 0.0
     
@@ -647,11 +691,12 @@ def formulario():
     selectores_dama = generate_selectors("dama", modelo_dama, metal_dama, kilates_dama, anchos_d, tallas_d, ancho_dama, talla_dama, tipo_diamante_dama)
     selectores_cab = generate_selectors("cab", modelo_cab, metal_cab, kilates_cab, anchos_c, tallas_c, ancho_cab, talla_cab, tipo_diamante_cab)
     
+    # Mensaje de estado del oro usando el porcentaje normalizado
     precio_oro_status = f"Precio FINAL Onza Oro: ${precio_onza:,.2f} USD (Margen: {porcentaje_display:.2f}%)"
     precio_oro_color = "text-green-600 font-medium" if status == "live" else "text-yellow-700 font-bold bg-yellow-100 p-2 rounded"
     logo_url = url_for('static', filename='logo.png')
     
-    # --- Lógica de Visibilidad de Secciones y Agregado de Imagen ---
+    # --- Lógica de Visibilidad de Secciones y Agregado de Imagen (Se mantiene) ---
     texto_seleccionado = t['seleccionar'].upper()
     
     modelo_dama_visible = modelo_dama != texto_seleccionado
@@ -722,7 +767,7 @@ def formulario():
             </div>
         """
     
-    # --- Estructura HTML (con mejoras visuales) ---
+    # --- Estructura HTML (Se mantiene) ---
     html_form = f"""
     <!DOCTYPE html>
     <html lang="{idioma.lower()}">
