@@ -1,3 +1,7 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv() 
 import requests
 import os
 import pandas as pd
@@ -1112,6 +1116,14 @@ def catalogo():
     </html>
     """
     return render_template_string(html_catalogo)
+# =================================================================
+# 5. INICIO DE LA APLICACIÓN
+# =================================================================
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    # Este bloque solo se ejecuta cuando corres localmente con 'python app.py'
+    # En producción (Render) se usa Gunicorn, no app.run()
+    print(f"Iniciando en modo de desarrollo local...")
     app.run(debug=True)
+#if __name__ == "__main__":
+    #app.run(debug=True)

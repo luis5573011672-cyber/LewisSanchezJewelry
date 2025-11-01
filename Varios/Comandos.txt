@@ -9,8 +9,14 @@ PASOS PARA ACTUALIZAR CAMBIOS EN GIBHUB Y RENDER
 cd "C:\Users\sluis\Documents\Lewis\Formulario WEB"
 
 git add .
-git commit -m "CAMBIO DE BOTON"
+git commit -m "Modificacion API KEY y % 3"
 
 SUBIR LOS CAMBIOS A GITHUB
 git push origin main 
 # (Usa 'master' en lugar de 'main' si esa es tu rama principal)
+
+
+Ejecutar Localmente proyecto 
+python Formulario.py
+
+http://127.0.0.1:5000

@@ -3,3 +3,4 @@ pandas
 openpyxl
 requests
 gunicorn
+python-dotenv  # ¡Añadir para la configuración local (.env)!
